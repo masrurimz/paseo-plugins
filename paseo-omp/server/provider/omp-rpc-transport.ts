@@ -887,7 +887,7 @@ export class OmpRpcProcess {
       : isHistory
         ? 400_000
         : pending.command === "get_available_models"
-          ? 16_384
+          ? 65_536
           : 2_048;
     const violation = jsonBoundViolation(
       boundedFrame,
