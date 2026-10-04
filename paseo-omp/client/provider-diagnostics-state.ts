@@ -10,6 +10,22 @@ import type {
 import { isOmpProvider } from "./omp-store-state";
 import type { PaseoApi, PaseoProviderSnapshotResult } from "./paseo-types";
 
+import { displayForStatus } from "../shared/availability-display";
+export type { AvailabilityDisplay, AvailabilityStatus } from "../shared/availability-display";
+export { displayForStatus, toAvailabilityDisplay } from "../shared/availability-display";
+
+/**
+ * Cache identity the config surface's health query uses for the default store and the
+ * daemon working directory. The Hub sidebar reuses the same key so its availability dot reads an
+ * existing result rather than starting a second probe; it adds no new RPC contract and no timer.
+ */
+export const HUB_AVAILABILITY_QUERY_KEY = [
+  "paseo-omp",
+  "provider-health",
+  "default",
+  "global",
+] as const;
+
 export type ProviderHealthTone = "ok" | "warning" | "danger" | "muted";
 export const OMP_PROVIDER_IDS = ["omp", "omp-plugin"] as const;
 
@@ -258,4 +274,47 @@ export function selectKnownOmpProviders(
         ]
       : [],
   );
+}
+
+export interface PerProfileAvailabilityInput {
+  /** Snapshot entries narrow the candidate profiles; only OMP identities are considered. */
+  providers: readonly PaseoProviderSnapshotResult["entries"][number][];
+  /** Daemon-observed `error` text per provider id — the only per-agent signal that reaches the client. */
+  errors: Readonly<Record<string, string | undefined>>;
+  /** Default-binary classification from the already-fetched health result, if any. */
+  defaultDisplay?: import("../shared/availability-display").AvailabilityDisplay;
+}
+
+/**
+ * Pre-launch availability per OMP profile without a new probe or status registration.
+ *
+ * The default `omp`/`omp-plugin` identities reuse the shared health classification (probed once
+ * for the daemon-default binary). Named profiles (`omp-plugin-<profile>`) keep plugin-owned
+ * launch, so their own `providerOptions.command` (Doppler/env wrappers included) is the only
+ * binary that could speak for them — and the client never sees it. The daemon does observe it
+ * through `checkAvailability` at refresh time and records the outcome as the snapshot entry's
+ * `status`/`error`, so a profile reading `unavailable`/`error` with daemon text maps to
+ * `unrunnable` copy *for that profile only*, while every other case stays silent rather than
+ * guessing the wrong binary. All strings are the fixed `AVAILABILITY_COPY` allowlist.
+ */
+export function selectPerProfileAvailability(
+  input: PerProfileAvailabilityInput,
+): ReadonlyMap<string, import("../shared/availability-display").AvailabilityDisplay> {
+  const known = selectKnownOmpProviders(input.providers);
+  const result = new Map<string, import("../shared/availability-display").AvailabilityDisplay>();
+  for (const provider of known) {
+    const isDefaultProfile = provider.id === "omp" || provider.id === "omp-plugin";
+    if (isDefaultProfile) {
+      if (input.defaultDisplay?.showBadge) result.set(provider.id, input.defaultDisplay);
+      continue;
+    }
+    const failed = provider.status === "unavailable" || provider.status === "error";
+    if (failed && (input.errors[provider.id] ?? provider.id.length > 0)) {
+      const { displayForStatus } = require("../shared/availability-display") as typeof import(
+        "../shared/availability-display"
+      );
+      result.set(provider.id, displayForStatus("unrunnable"));
+    }
+  }
+  return result;
 }

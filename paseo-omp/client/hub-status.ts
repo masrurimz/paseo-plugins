@@ -1,3 +1,4 @@
+import type { AvailabilityDisplay } from "../shared/availability-display";
 import type { HubProcess } from "../shared/hub";
 
 export type HubProcessTone = "success" | "warning" | "danger" | "muted";
@@ -26,4 +27,14 @@ export function summarizeHubProcesses(processes: readonly HubProcess[]): {
     visible: true,
     label: `Hub · ${processes.length}${hasFailure ? " !" : ""}`,
   };
+}
+
+/**
+ * Trailing suffix for a pre-launch availability problem; null when available (or not yet
+ * observed), so the Hub row shows no badge and its accessibility label stays unchanged.
+ */
+export function availabilityTrailingSuffix(
+  display: AvailabilityDisplay | undefined,
+): string | null {
+  return display?.showBadge ? display.label : null;
 }
