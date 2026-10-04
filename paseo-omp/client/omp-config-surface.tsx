@@ -27,6 +27,7 @@ import {
 } from "../shared/omp-settings";
 import { type OmpStore, storeLabel } from "../shared/omp-store";
 import { getOmpProviderHealth, type OmpProviderHealth } from "../shared/provider-diagnostics";
+import { classifySettingImpact, deriveRestartRequired } from "../shared/restart-required";
 import { getOmpSupportReport, OMP_SUPPORT_ISSUE_URL } from "../shared/support-diagnostics";
 import { ComposerPillSettingsSection } from "./composer-pill-settings";
 import { openOmpExternalUrl } from "./external-url";
@@ -44,6 +45,7 @@ import { OmpPluginManagerSection } from "./omp-plugin-manager";
 import { type OmpModelCatalogState, StructuredRoutingEditor } from "./omp-routing-editor";
 import { OmpStorePicker } from "./omp-store-picker";
 import { ompStoreKey } from "./omp-store-state";
+import { POLICY_BOUNDARY_COPY } from "./policy-explainer";
 import {
   type BinaryHealthSummary,
   loadReadyProviderSnapshot,
@@ -195,6 +197,17 @@ function PluginConfigurationSection({ styles }: { styles: OmpConfigStyles }) {
     </>
   );
 }
+function PolicyExplainerCard({ styles }: { styles: OmpConfigStyles }) {
+  return (
+    <SectionCard styles={styles} title={POLICY_BOUNDARY_COPY.title}>
+      <Text style={styles.muted}>{POLICY_BOUNDARY_COPY.body}</Text>
+      <Text selectable style={styles.settingPath}>
+        Canonical copy: {POLICY_BOUNDARY_COPY.docAnchor}
+      </Text>
+    </SectionCard>
+  );
+}
+
 function toneColor(theme: PluginSurfaceProps["theme"], tone: BinaryHealthSummary["tone"]): string {
   if (tone === "ok") return theme.colors.statusSuccess;
   if (tone === "warning") return theme.colors.statusWarning;
@@ -814,6 +827,7 @@ function ConfigurationCategory({
           setting.type === (setting.path === "cycleOrder" ? "array" : "record");
         const settingDocumentation = documentationForSettingPath(setting.path);
         const draft = drafts[setting.path];
+        const impact = classifySettingImpact(setting.path);
         return (
           <View key={setting.path} style={styles.setting}>
             <View style={styles.settingHeader}>
@@ -821,6 +835,11 @@ function ConfigurationCategory({
               {setting.workspaceOverride ? (
                 <Text style={styles.source}>Workspace override</Text>
               ) : null}
+              {impact === "live" ? null : (
+                <Text style={[styles.source, { flexShrink: 1 }]}>
+                  {impact === "new-sessions" ? "New sessions" : "Restart required"}
+                </Text>
+              )}
               {!complex && !editable && !structuredEditable ? (
                 <StructuredSettingValue setting={setting} styles={styles} />
               ) : null}
@@ -1053,6 +1072,7 @@ function OmpConfigContent({
     },
   });
   const draftCount = Object.keys(drafts).length;
+  const restartRequired = deriveRestartRequired(Object.keys(drafts));
   const workspaceOverrideCount = catalog.sourceSettings.filter(
     (setting) => setting.workspaceOverride,
   ).length;
@@ -1136,6 +1156,7 @@ function OmpConfigContent({
       {view === "plugin" ? (
         <>
           <PluginConfigurationSection styles={styles} />
+          <PolicyExplainerCard styles={styles} />
           {!cwd ? <ProviderLaunchSettingsSection theme={theme} /> : null}
         </>
       ) : null}
@@ -1217,6 +1238,19 @@ function OmpConfigContent({
             </Text>
           ) : null}
 
+          {draftCount > 0 && restartRequired.requiresRestart ? (
+            <Text style={styles.muted}>
+              {`Restart required: ${restartRequired.affectedPaths.length} change${
+                restartRequired.affectedPaths.length === 1 ? "" : "s"
+              } apply to new sessions only (${
+                restartRequired.reason === "approval-mode"
+                  ? "OMP fixes approval mode at launch"
+                  : restartRequired.reason === "settings-live-reject"
+                    ? "OMP rejects live settings"
+                    : "OMP fixes approval mode at launch and rejects live settings"
+              }).`}
+            </Text>
+          ) : null}
           {draftCount > 0 ? (
             <View style={styles.editorActions}>
               <Text style={styles.muted}>{draftCount} unsaved changes</Text>

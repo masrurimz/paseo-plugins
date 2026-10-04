@@ -64,7 +64,7 @@ Use the **MCP** control beside the composer on an **OMP Plugin** agent to run OM
 
 Command output, setup questions, and OAuth prompts appear in the agent timeline. OAuth URLs render as an interactive card and always retain the full provider authorization URL, never substituting OMP's daemon-local `/launch` shortcut. **Open in Paseo Browser** calls the current agent's caller-scoped `browser_new_tab` tool, so the authorization page becomes a browser tab in the same workspace; it requires Paseo tools to be injected into the agent, browser tools to be enabled, and a connected Paseo desktop browser host. **Open on this device** remains available when no browser host is connected. For a loopback callback to complete automatically, the chosen browser host must run on the daemon machine. Otherwise, finish authorization in either browser, copy the final redirect URL or authorization code, and submit it in the OMP authorization prompt. Tokens and refresh material are stored by OMP on the daemon (or its configured auth broker), never in the Paseo client or plugin timeline.
 
-Paseo's exact session `toolPolicy` preapproval grants are not equivalent to OMP's `set_host_tools` contract. The plugin cannot preserve that policy exactly, so any non-empty `toolPolicy` rejects session startup. It never converts exact grants into broader access. `disallowedTools` is separate: it controls only recognized native OMP built-ins and rejects unknown names.
+Paseo's exact session `toolPolicy` preapproval grants are not equivalent to OMP's `set_host_tools` contract. The plugin cannot preserve that policy exactly, so any non-empty `toolPolicy` rejects session startup. It never converts exact grants into broader access. `disallowedTools` is separate: it controls only recognized native OMP built-ins and rejects unknown names. This section is the canonical copy; the **OMP → Plugin** tab restates the rule once in its Tool access boundary card and links back here.
 
 ## Credentials and environment
 
@@ -116,6 +116,7 @@ The plugin validates and bounds native protocol data, but it does not heuristica
 - Typed OMP approval frames become Paseo tool permissions when both sides negotiate `typedToolApprovals: 1`.
 - OMP 18.1.15 uses the bounded generic interaction fallback.
 - Changing approval mode requires a new session. Live model and thinking changes are supported.
+- In the Configuration tab, settings marked **Restart required** are read when an OMP process starts, and modes marked **New sessions** only affect sessions started after Apply. Live settings carry no badge.
 
 ## Persistence and images
 
