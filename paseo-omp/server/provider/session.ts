@@ -26,6 +26,7 @@ import {
 } from "./config-normalization";
 import { OmpHostToolsBridge, type OmpMcpConnector, validateOmpHostToolConfig } from "./host-tools";
 import { isOmpImageMimeType, OmpImageMaterializer } from "./image";
+import { rejectDetails, rejectErrorDetails, rejectWithHint } from "./instead-hints";
 import type { OmpRuntime, OmpRuntimeSession } from "./omp-rpc";
 import { buildOmpSpawnRequest, type OmpStartOptions } from "./omp-rpc-environment";
 import type {
@@ -248,7 +249,7 @@ type PendingAbort = {
   promise: Promise<void>;
 };
 function providerError(error: unknown, fallback: string): { message: string } {
-  return { message: isOmpPublicError(error) ? error.message : fallback };
+  return rejectDetails(error, isOmpPublicError(error) ? error.message : fallback);
 }
 async function settleSessionCleanup(promises: readonly Promise<void>[]): Promise<void> {
   const pending = [...promises];
@@ -839,7 +840,7 @@ export class OmpProviderSession {
       this.emit({
         type: "request.failed",
         requestId: input.requestId,
-        error: { message: "OMP supports conversation rewind only" },
+        error: rejectErrorDetails("revert-scope", "OMP supports conversation rewind only"),
       });
       return;
     }
@@ -1532,12 +1533,13 @@ export class OmpProviderSession {
         throw new OmpPublicError("OMP session is unavailable for configuration");
       }
       if (input.changes.mode !== undefined && input.changes.mode !== this.configState.mode) {
-        throw new OmpPublicError(
+        throw rejectWithHint(
+          "live-mode",
           "OMP approval mode cannot change live; create a new session instead",
         );
       }
       if (input.changes.settings && Object.keys(input.changes.settings).length > 0) {
-        throw new OmpPublicError("OMP does not expose live provider settings");
+        throw rejectWithHint("live-settings", "OMP does not expose live provider settings");
       }
       if (input.changes.model === null || input.changes.thinkingOption === null) {
         throw new OmpPublicError("OMP model and thinking selections cannot be cleared");

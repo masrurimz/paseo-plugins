@@ -11,6 +11,16 @@ export async function refreshSupportReport(
 }
 
 export type SupportReportCopyState = "idle" | "copying" | "copied" | "error";
+export type SupportBundleCopyState = "idle" | "bundling" | "copied" | "error";
+
+export interface SupportBundleViewState {
+  bundleLabel: string;
+  bundleDisabled: boolean;
+  bundleFeedback: string | null;
+  transcriptStatus: "not-requested" | "included" | "unavailable";
+  transcriptNote: string | null;
+  redactionReminder: string | null;
+}
 
 export interface SupportDiagnosticsViewState {
   refreshLabel: string;
@@ -41,5 +51,38 @@ export function supportDiagnosticsViewState(input: {
         : input.copyState === "error"
           ? "Could not copy. Select the report text and copy it manually."
           : null,
+  };
+}
+
+const TRANSCRIPT_REDACTION_REMINDER =
+  "Transcript excerpt may contain credentials. Review and redact before pasting.";
+
+/**
+ * Bundle view model. The transcript half is opt-in per copy, so the reminder only appears once the
+ * user actually asked for an excerpt; a bundle without a transcript is a plain report copy.
+ */
+export function supportBundleViewState(input: {
+  hasReport: boolean;
+  copyState: SupportBundleCopyState;
+  transcriptRequested: boolean;
+  transcriptStatus: "not-requested" | "included" | "unavailable";
+  transcriptNote: string | null;
+}): SupportBundleViewState {
+  const transcriptIncluded = input.transcriptStatus === "included";
+  return {
+    bundleLabel: input.copyState === "bundling" ? "Bundling…" : "Copy bundle",
+    bundleDisabled: !input.hasReport || input.copyState === "bundling",
+    bundleFeedback:
+      input.copyState === "copied"
+        ? transcriptIncluded
+          ? "Bundle copied. Review the transcript excerpt before pasting."
+          : "Bundle copied."
+        : input.copyState === "error"
+          ? "Could not copy the bundle. Select the report text and copy it manually."
+          : null,
+    transcriptStatus: input.transcriptStatus,
+    transcriptNote: input.transcriptNote,
+    redactionReminder:
+      input.transcriptRequested && transcriptIncluded ? TRANSCRIPT_REDACTION_REMINDER : null,
   };
 }

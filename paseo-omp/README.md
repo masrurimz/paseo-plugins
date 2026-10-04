@@ -115,6 +115,7 @@ Tracking rules:
 2. Raise a row only when the provider advertises the capability and an observable contract test covers its success and failure boundaries.
 3. Keep native-agent limitations at less than 100% even when the adapter itself is complete; do not count undocumented fallbacks as support.
 4. Keep the detailed evidence and regression locations in [TESTING.md](TESTING.md); this README is the public progress ledger.
+5. Record one wire-diff outcome per OMP release. `node scripts/omp-wire-diff.mjs --omp <rpc-wire.schema.json> --protocol server/provider/omp-rpc-protocol.ts` prints a `clean` / `additive-optional` / `additive-required` / `removed-or-renamed` / `type-change` table and exits 2 on release-blocking drift; attach that table to the scoring change so the release stays comparable.
 
 ## Compatibility and coexistence
 

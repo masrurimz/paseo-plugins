@@ -28,6 +28,7 @@ import { OmpPublicError } from "./server/provider/security";
 import { resolveGetOmpProviderHealth } from "./server/provider-diagnostics";
 import { resolveListOmpQuotas } from "./server/quota";
 import { resolveListOmpSessions } from "./server/sessions";
+import { resolveGetOmpSupportBundle } from "./server/support-bundle";
 import { resolveGetOmpSupportReport } from "./server/support-diagnostics";
 import { composerPillSettings } from "./shared/composer-pill-settings";
 import { listHubProcesses, tailHubLog } from "./shared/hub";
@@ -47,6 +48,7 @@ import { getOmpProviderHealth } from "./shared/provider-diagnostics";
 import { providerLaunchSettings } from "./shared/provider-launch-settings";
 import { listOmpQuotas } from "./shared/quota";
 import { listOmpSessions } from "./shared/sessions";
+import { getOmpSupportBundle } from "./shared/support-bundle";
 import { getOmpSupportReport } from "./shared/support-diagnostics";
 
 function scoped<T extends { store?: OmpStore }, R>(handler: (input: T) => R) {
@@ -93,6 +95,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(
     getOmpSupportReport,
     scoped((input) => resolveGetOmpSupportReport(input, protocolViolations, operationalFailures)),
+  );
+  server.handle(
+    getOmpSupportBundle,
+    scoped((input) => resolveGetOmpSupportBundle(input, protocolViolations, operationalFailures)),
   );
   server.handle(openOmpMcpAuthorizationInPaseoBrowser, (input) =>
     resolveOpenOmpMcpAuthorizationInPaseoBrowser(input, browserAuthorizationRegistry),

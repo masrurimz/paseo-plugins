@@ -1,6 +1,7 @@
 import type { ProviderContent, ProviderInput } from "@getpaseo/plugin/server/provider";
 import { getForgeDefinitionOrNeutral } from "@getpaseo/protocol/forge-manifest";
 import { isValidImagePayload } from "./image";
+import { rejectWithHint } from "./instead-hints";
 import type { OmpImage } from "./omp-rpc-protocol";
 import { OmpPublicError, utf8Bytes } from "./security";
 
@@ -184,7 +185,10 @@ function padLineNumber(lineNumber: number | null): string {
 
 export function promptPayload(input: SessionPromptInput): OmpPromptPayload {
   if (input.prompt.outputSchema !== undefined || input.prompt.clearPendingPermissions) {
-    throw new OmpPublicError("OMP does not support structured output or permission controls");
+    throw rejectWithHint(
+      "outputSchema",
+      "OMP does not support structured output or permission controls",
+    );
   }
   if (input.prompt.input.type === "command") {
     const name = input.prompt.input.name.trim();
