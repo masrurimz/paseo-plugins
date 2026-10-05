@@ -109,6 +109,56 @@ describe("OMP bounded stop paths", () => {
     await connection.close();
   });
 
+  test("a hung branch-message lookup still lets agent_end terminalize", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness();
+    await openSession(connection, events);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "hung-branch", "hello"));
+    const session = sessionAt(runtime);
+    session.branchMessagesGate = new Promise<void>(() => {});
+    session.emit({ type: "message_end", message: { role: "user", content: "hello" } });
+    session.emit({ type: "agent_end", messages: [], isTerminal: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(session.branchMessageLookups).toBe(1);
+    await scheduler.flush(2_000);
+    expect(scheduler.delays).toContain(2_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "completed" }));
+    await connection.close();
+  });
+
+  test("a hung user correlation does not block interrupt settlement", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness();
+    await openSession(connection, events);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "hung-interrupt", "hello"));
+    const session = sessionAt(runtime);
+    session.branchMessagesGate = new Promise<void>(() => {});
+    session.emit({ type: "message_end", message: { role: "user", content: "hello" } });
+    await connection.send({
+      type: "session.interrupt",
+      requestId: "stop-hung-lookup",
+      sessionId: "session-1",
+    });
+    await events.waitFor(
+      (event) => event.type === "request.completed" && event.requestId === "stop-hung-lookup",
+    );
+    session.emit({ type: "agent_end", messages: [], isTerminal: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(session.branchMessageLookups).toBe(1);
+    await scheduler.flush(2_000);
+    expect(scheduler.delays).toContain(2_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "canceled" }));
+    await connection.close();
+  });
+
   test("a hanging native steer fails bounded instead of pinning the turn", async () => {
     const { connection, events, runtime, scheduler } = await createHarness();
     await openSession(connection, events);

@@ -2615,7 +2615,29 @@ export class OmpProviderSession {
   private async refreshBranchEntries(turn: ActiveTurn, pending: PendingUser): Promise<boolean> {
     const runtime = this.runtime;
     try {
-      const messages = await runtime.getBranchMessages();
+      const branchRequest = runtime.getBranchMessages();
+      void branchRequest.catch(() => undefined);
+      const timeout = Promise.withResolvers<null>();
+      const timer = this.scheduler.set(() => timeout.resolve(null), AGENT_END_STATE_TIMEOUT_MS);
+      let messages: Awaited<typeof branchRequest> | null = null;
+      try {
+        messages = await Promise.race([branchRequest, timeout.promise]);
+      } finally {
+        this.scheduler.clear(timer);
+      }
+      if (messages === null) {
+        if (
+          !this.closed &&
+          !turn.terminal &&
+          this.activeTurn === turn &&
+          turn.pendingUsers[0] === pending &&
+          turn.generation === this.generation &&
+          runtime === this.runtime
+        ) {
+          this.quarantineBranchEntries();
+        }
+        return false;
+      }
       if (
         this.closed ||
         turn.terminal ||
@@ -3091,15 +3113,28 @@ export class OmpProviderSession {
     });
   }
 
+  private async waitForUserLookups(turn: ActiveTurn): Promise<boolean> {
+    if (turn.userLookups.size === 0) return true;
+    const settled = Promise.allSettled(turn.userLookups).then(() => true);
+    const timeout = Promise.withResolvers<boolean>();
+    const timer = this.scheduler.set(() => timeout.resolve(false), AGENT_END_STATE_TIMEOUT_MS);
+    try {
+      return await Promise.race([settled, timeout.promise]);
+    } finally {
+      this.scheduler.clear(timer);
+    }
+  }
+
   private async checkAgentEndState(turn: ActiveTurn, candidate: TerminalCandidate): Promise<void> {
-    await Promise.allSettled(turn.userLookups);
-    if (!turn.agentEndPending || turn.terminal || this.activeTurn !== turn) return;
-    while (turn.userEchoes.length > 0) {
+    let timedOut = !(await this.waitForUserLookups(turn));
+    if (!timedOut && (!turn.agentEndPending || turn.terminal || this.activeTurn !== turn)) return;
+    while (!timedOut && turn.userEchoes.length > 0) {
       this.drainUserEchoes(turn);
       if (turn.userLookups.size === 0) break;
-      await Promise.allSettled(turn.userLookups);
-      if (!turn.agentEndPending || turn.terminal || this.activeTurn !== turn) return;
+      timedOut = !(await this.waitForUserLookups(turn));
+      if (!timedOut && (!turn.agentEndPending || turn.terminal || this.activeTurn !== turn)) return;
     }
+    if (!timedOut && (!turn.agentEndPending || turn.terminal || this.activeTurn !== turn)) return;
     if (
       !turn.interrupted &&
       candidate.confidence !== "keyed" &&
