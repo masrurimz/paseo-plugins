@@ -639,6 +639,8 @@ export class OmpTimelineProjector {
         this.publishCommand(turnId);
         return;
       }
+      case "session_settled":
+        return;
     }
   }
 

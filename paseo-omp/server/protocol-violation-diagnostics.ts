@@ -21,6 +21,7 @@ export interface OmpProtocolViolationSummary {
   latestField: OmpProtocolViolationDiagnostic["field"] | null;
   latestExpected: OmpProtocolViolationDiagnostic["expected"] | null;
   latestActualType: OmpProtocolViolationDiagnostic["actualType"] | null;
+  latestUnknownType: OmpProtocolViolationDiagnostic["unknownType"] | null;
   maxByteSize: number | null;
   latestLimitBytes: number | null;
 }
@@ -64,6 +65,7 @@ function logProtocolViolation(message: string, diagnostic: OmpProtocolViolationD
     ...(diagnostic.field ? [`field: ${diagnostic.field}`] : []),
     ...(diagnostic.expected ? [`expected: ${diagnostic.expected}`] : []),
     ...(diagnostic.actualType ? [`actualType: ${diagnostic.actualType}`] : []),
+    ...(diagnostic.unknownType ? [`unknownType: ${diagnostic.unknownType}`] : []),
     ...(diagnostic.maxByteSize ? [`maxByteSize: ${diagnostic.maxByteSize}`] : []),
     ...(diagnostic.limitBytes ? [`limitBytes: ${diagnostic.limitBytes}`] : []),
   ];
@@ -92,6 +94,7 @@ export class OmpProtocolViolationCollector {
         latestField: null,
         latestExpected: null,
         latestActualType: null,
+        latestUnknownType: null,
         maxByteSize: null,
         latestLimitBytes: null,
       },
@@ -131,6 +134,12 @@ export class OmpProtocolViolationCollector {
       summary.latestField = diagnostic.field ?? null;
       summary.latestExpected = diagnostic.expected ?? null;
       summary.latestActualType = diagnostic.actualType ?? null;
+      summary.latestUnknownType =
+        typeof diagnostic.unknownType === "string" &&
+        diagnostic.unknownType.length > 0 &&
+        diagnostic.unknownType.length <= 64
+          ? diagnostic.unknownType
+          : null;
       const byteSize = boundedCount(diagnostic.maxByteSize);
       if (byteSize > 0) summary.maxByteSize = Math.max(summary.maxByteSize ?? 0, byteSize);
       const limitBytes = boundedCount(diagnostic.limitBytes);
@@ -146,6 +155,7 @@ export class OmpProtocolViolationCollector {
         ...(summary.latestField ? { field: summary.latestField } : {}),
         ...(summary.latestExpected ? { expected: summary.latestExpected } : {}),
         ...(summary.latestActualType ? { actualType: summary.latestActualType } : {}),
+        ...(summary.latestUnknownType ? { unknownType: summary.latestUnknownType } : {}),
         ...(byteSize > 0 ? { maxByteSize: byteSize } : {}),
         ...(limitBytes > 0 ? { limitBytes } : {}),
       };

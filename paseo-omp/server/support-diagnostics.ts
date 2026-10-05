@@ -179,6 +179,7 @@ export function formatOmpSupportReport(data: OmpSupportReportData): string {
       `${prefix}.latest_field: ${violation.latestField ?? "unknown"}`,
       `${prefix}.latest_expected: ${violation.latestExpected ? EXPECTATION_LABELS[violation.latestExpected] : "unknown"}`,
       `${prefix}.latest_actual_type: ${violation.latestActualType ?? "unknown"}`,
+      `${prefix}.latest_unknown_type: ${violation.latestUnknownType ?? "unknown"}`,
       `${prefix}.max_byte_size: ${finiteCount(violation.maxByteSize)}`,
       `${prefix}.latest_limit_bytes: ${finiteCount(violation.latestLimitBytes)}`,
     );

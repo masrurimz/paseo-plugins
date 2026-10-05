@@ -239,6 +239,7 @@ export const OMP_PROTOCOL_EVENT_TYPES = [
   "tool_approval_request",
   "tool_approval_cancel",
   "advisor_yielded",
+  "session_settled",
 ] as const;
 export type OmpProtocolEventType = (typeof OMP_PROTOCOL_EVENT_TYPES)[number];
 
@@ -322,6 +323,7 @@ export interface OmpProtocolViolationDiagnostic {
   field?: OmpProtocolDiagnosticField;
   expected?: OmpProtocolDiagnosticExpectation;
   actualType?: OmpProtocolDiagnosticActualType;
+  unknownType?: string;
   maxByteSize?: number;
   limitBytes?: number;
 }
@@ -388,7 +390,7 @@ export function invalidEventDiagnosticMetadata(
   type: string,
 ): Pick<
   OmpProtocolViolationDiagnostic,
-  "reason" | "eventType" | "frameType" | "field" | "expected" | "actualType"
+  "reason" | "eventType" | "frameType" | "field" | "expected" | "actualType" | "unknownType"
 > {
   if (!isProtocolEventType(type)) {
     return {
@@ -396,6 +398,7 @@ export function invalidEventDiagnosticMetadata(
       field: "frame.type",
       expected: "known-event-type",
       actualType: "string",
+      ...(type.length > 0 && type.length <= 64 ? { unknownType: type } : {}),
     };
   }
   if (type !== "notice") {
@@ -1432,6 +1435,7 @@ const OmpCoreAgentEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("turn_start") }),
   z.object({ type: z.literal("turn_end") }),
+  z.object({ type: z.literal("session_settled") }),
   z.object({ type: z.literal("message_start"), message: OmpMessageSchema }),
   z.object({
     type: z.literal("message_update"),
