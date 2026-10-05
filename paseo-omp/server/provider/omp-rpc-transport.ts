@@ -102,6 +102,19 @@ export class OmpRpcResponseLimitError extends Error {
   }
 }
 
+export class OmpSpawnError extends Error {
+  readonly command: string;
+  readonly cwd: string;
+  readonly code: string | undefined;
+  constructor(message: string, command: string, cwd: string, code: string | undefined) {
+    super(message);
+    this.name = "OmpSpawnError";
+    this.command = command;
+    this.cwd = cwd;
+    this.code = code;
+  }
+}
+
 type PendingRequest = {
   resolve(value: unknown): void;
   reject(error: Error): void;
@@ -226,12 +239,15 @@ export class OmpRpcProcess {
           });
     } catch (cause) {
       const code = (cause as NodeJS.ErrnoException)?.code;
-      throw new Error(
+      throw new OmpSpawnError(
         code === "ENOENT"
           ? "OMP executable was not found"
           : code === "EACCES" || code === "EPERM"
             ? "OMP executable is not runnable"
             : "OMP process could not be launched",
+        request.command,
+        request.cwd,
+        typeof code === "string" ? code : undefined,
       );
     }
     this.child.stdout.on("data", (chunk: Buffer | string) => this.receiveData(chunk));
@@ -253,12 +269,15 @@ export class OmpRpcProcess {
         this.spawnFailedWithoutProcess = true;
       }
       this.fail(
-        new Error(
+        new OmpSpawnError(
           code === "ENOENT"
             ? "OMP executable was not found"
             : code === "EACCES" || code === "EPERM"
               ? "OMP executable is not runnable"
               : "OMP process could not be launched",
+          request.command,
+          request.cwd,
+          typeof code === "string" ? code : undefined,
         ),
       );
     });
@@ -1136,7 +1155,11 @@ export class OmpRpcProcess {
     if (event.data.type === "prompt_result" && event.data.id) {
       this.acceptedPromptIds.delete(event.data.id);
     }
-    if (event.data.type === "turn_end" || event.data.type === "agent_end") {
+    if (
+      event.data.type === "turn_end" ||
+      event.data.type === "agent_end" ||
+      event.data.type === "session_settled"
+    ) {
       this.turnActive = false;
     }
     if (
@@ -1312,6 +1335,7 @@ export class OmpRpcProcess {
     pending.field = metadata.field;
     pending.expected = metadata.expected;
     pending.actualType = metadata.actualType;
+    pending.unknownType = metadata.unknownType;
     pending.limitBytes = metadata.limitBytes;
   }
 

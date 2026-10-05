@@ -2,7 +2,7 @@ import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
 import { describe, expect, test, vi } from "vitest";
 import { createOmpConnection, type OmpConnectionDiagnostic } from "../server/provider/connection";
 import type { OmpRuntime } from "../server/provider/omp-rpc";
-import { OmpRpcResponseLimitError } from "../server/provider/omp-rpc-transport";
+import { OmpRpcResponseLimitError, OmpSpawnError } from "../server/provider/omp-rpc-transport";
 
 async function failedOpen(
   error: unknown,
@@ -136,6 +136,56 @@ describe("connection failure diagnostics", () => {
     const diagnostics: OmpConnectionDiagnostic[] = [];
     await failedOpen(new Error(message), (entry) => diagnostics.push(entry));
     expect(diagnostics[0]).toMatchObject({ classification, stage: "spawn" });
+  });
+
+  test("carries spawn request context on ENOENT failures", async () => {
+    const diagnostics: OmpConnectionDiagnostic[] = [];
+    await failedOpen(
+      new OmpSpawnError("OMP executable was not found", "/x/bin/omp", "/work/a", "ENOENT"),
+      (entry) => diagnostics.push(entry),
+    );
+    expect(diagnostics[0]).toMatchObject({
+      errorClass: "Error",
+      classification: "spawn-not-found",
+      stage: "spawn",
+      executable: "/x/bin/omp",
+      spawnCwd: "/work/a",
+      code: "ENOENT",
+    });
+  });
+
+  test("carries spawn request context on EACCES failures", async () => {
+    const diagnostics: OmpConnectionDiagnostic[] = [];
+    await failedOpen(
+      new OmpSpawnError("OMP executable is not runnable", "/x/bin/omp", "/work/a", "EACCES"),
+      (entry) => diagnostics.push(entry),
+    );
+    expect(diagnostics[0]).toMatchObject({
+      errorClass: "Error",
+      classification: "spawn-not-runnable",
+      stage: "spawn",
+      executable: "/x/bin/omp",
+      spawnCwd: "/work/a",
+      code: "EACCES",
+    });
+  });
+
+  test("drops a non-string spawn command field safely", async () => {
+    const diagnostics: OmpConnectionDiagnostic[] = [];
+    const error = Object.assign(
+      new OmpSpawnError("OMP executable was not found", "/x/bin/omp", "/work/a", "ENOENT"),
+      { command: 42 as unknown as string },
+    );
+    const events = await failedOpen(error, (entry) => diagnostics.push(entry));
+    expect(diagnostics[0]).toMatchObject({
+      errorClass: "Error",
+      classification: "spawn-not-found",
+      stage: "spawn",
+      spawnCwd: "/work/a",
+      code: "ENOENT",
+    });
+    expect(diagnostics[0]).not.toHaveProperty("executable");
+    expect(JSON.stringify({ diagnostics, events })).not.toContain("/x/bin/omp");
   });
 
   test.each([

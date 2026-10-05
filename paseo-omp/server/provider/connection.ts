@@ -72,6 +72,8 @@ const MAX_PROVIDER_INPUT_BYTES = 2 * 1024 * 1024;
 const MAX_NESTED_OPTION_BYTES = 256 * 1024;
 const MAX_ENV_ENTRIES = 256;
 const MAX_NATIVE_SESSION_RESERVATIONS = 256;
+// Mirrors MAX_PATH_LENGTH in omp-rpc-values.ts; spawn request fields are already bounded there.
+const MAX_SPAWN_PATH_LENGTH = 4096;
 
 function hasOwnEntries(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
@@ -335,6 +337,8 @@ export interface OmpConnectionDiagnostic {
   bound?: OmpRpcBoundDimension;
   actual?: number;
   limit?: number;
+  executable?: string;
+  spawnCwd?: string;
 }
 
 // Match complete, locally authored messages only. Never log an arbitrary message, error name,
@@ -462,7 +466,36 @@ function classifyFailure(
   const message = error instanceof Error ? error.message : undefined;
   if (typeof message === "string") {
     const known = KNOWN_FAILURES.get(message);
-    if (known) return { ...result, ...known };
+    if (known) {
+      if (
+        error &&
+        typeof error === "object" &&
+        (known.classification === "spawn-not-found" ||
+          known.classification === "spawn-not-runnable" ||
+          known.classification === "spawn-failed")
+      ) {
+        const executableValue = Object.getOwnPropertyDescriptor(error, "command")?.value;
+        const spawnCwdValue = Object.getOwnPropertyDescriptor(error, "cwd")?.value;
+        const executable =
+          typeof executableValue === "string" && executableValue.length <= MAX_SPAWN_PATH_LENGTH
+            ? executableValue
+            : undefined;
+        const spawnCwd =
+          typeof spawnCwdValue === "string" && spawnCwdValue.length <= MAX_SPAWN_PATH_LENGTH
+            ? spawnCwdValue
+            : undefined;
+        const errnoValue = Object.getOwnPropertyDescriptor(error, "code")?.value;
+        const code = SYSTEM_ERROR_CODES.find((value) => value === errnoValue);
+        return {
+          ...result,
+          ...known,
+          ...(executable !== undefined ? { executable } : {}),
+          ...(spawnCwd !== undefined ? { spawnCwd } : {}),
+          ...(code ? { code } : {}),
+        };
+      }
+      return { ...result, ...known };
+    }
     const exit = /^OMP RPC process exited \(code (-?(?:0|[1-9]\d{0,9}))\)$/.exec(message);
     if (exit && exit[0] === message) {
       const exitCode = Number(exit[1]);
