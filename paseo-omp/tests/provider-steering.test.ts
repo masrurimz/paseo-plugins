@@ -742,7 +742,7 @@ describe("OMP direct provider", () => {
       },
     });
     await steerObserved.promise;
-    await scheduler.flush();
+    await scheduler.flush(5_000);
     expect(events.slice(baseline)).toEqual([]);
 
     session.emit({

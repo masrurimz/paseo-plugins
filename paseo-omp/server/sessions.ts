@@ -16,6 +16,12 @@ const SessionRowSchema = z.object({
   createdAt: z.number().int(),
 });
 
+// Legacy-only store decision: history.db/session_titles is written by the native OMP
+// CLI, not by provider sessions. Provider-managed sessions surface through the
+// provider `sessions` list (server/provider/connection.ts) backed by live native
+// descriptors, so descriptor titles are deliberately not merged here — the two
+// stores must never conflate.
+
 export function listOmpSessionsFrom(path: string, cwd: string): OmpSessionEntry[] {
   try {
     const database = new DatabaseSync(path, { readOnly: true, timeout: 500 });

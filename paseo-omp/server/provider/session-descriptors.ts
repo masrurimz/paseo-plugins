@@ -39,6 +39,29 @@ export interface OmpSessionDescriptor {
   lastPromptPreview?: string;
 }
 
+export const MAX_DESCRIPTOR_TITLE_BYTES = 512;
+
+/**
+ * Seed title for the session-open path. Prefers the native descriptor title,
+ * then falls back to the first prompt preview and finally the last prompt
+ * preview so resumed/imported sessions still show a meaningful header.
+ */
+export function resolveDescriptorTitleForOpen(
+  descriptor?: Pick<OmpSessionDescriptor, "title" | "firstPromptPreview" | "lastPromptPreview">,
+): string | undefined {
+  if (!descriptor) return undefined;
+  return descriptor.title ?? descriptor.firstPromptPreview ?? descriptor.lastPromptPreview;
+}
+
+/**
+ * Shared native-title sanitize cap (safeText, 512 bytes) for live setTitle sync.
+ * Exported stable domain concept and test seam; parseDescriptor applies the same
+ * cap inline above.
+ */
+export function sanitizeNativeTitle(value: unknown): string | undefined {
+  return safeText(value, MAX_DESCRIPTOR_TITLE_BYTES);
+}
+
 export interface OmpPersistedSubagentTranscript {
   sessionFile: string;
   nativeSessionId: string;

@@ -6,6 +6,7 @@ import type {
 } from "@getpaseo/plugin/server/provider";
 import { OMP_MCP_AUTH_TIMELINE_KIND } from "../../shared/mcp";
 import { isOmpImageMimeType, isValidImagePayload, type OmpImageMimeType } from "./image";
+import { sanitizeNativeTitle } from "./session-descriptors";
 import {
   OMP_MAX_CONTENT_PARTS,
   OMP_MESSAGE_REPLAY_POLICIES,
@@ -368,6 +369,7 @@ export class OmpTimelineProjector {
   private nativeIdentitySaturated = false;
   private assistantIdentitySequence = 0;
   private noticeSequence = 0;
+  private sessionTitle: string | null = null;
   private toolSequence = 0;
   private userSequence = 0;
   private replayTurnId: string | null = null;
@@ -683,6 +685,18 @@ export class OmpTimelineProjector {
       });
       return;
     }
+    if (event.type === "extension_ui_request" && event.method === "setTitle") {
+      const title = sanitizeNativeTitle(event.title);
+      if (!title || title === this.sessionTitle) return;
+      this.sessionTitle = title;
+      this.emit({
+        type: "session.notice",
+        sessionId: this.sessionId,
+        notice: { id: "omp:session-title", severity: "info", title },
+      });
+      return;
+    }
+
     if (event.type === "extension_ui_request" && event.method === "notify") {
       if (!event.message) return;
       this.noticeSequence += 1;

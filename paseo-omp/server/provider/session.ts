@@ -60,7 +60,7 @@ import {
 } from "./security";
 import { OmpSessionCompaction } from "./session-compaction";
 import type { OmpSessionDescriptor } from "./session-descriptors";
-import { validateNativeSessionId } from "./session-descriptors";
+import { resolveDescriptorTitleForOpen, validateNativeSessionId } from "./session-descriptors";
 import { isNativeTurnActivity, isPassiveUiMethod, isRuntimeConfigEvent } from "./session-events";
 import { OmpSessionPermissions } from "./session-permissions";
 import {
@@ -104,6 +104,9 @@ const USAGE_REFRESH_MS = 100;
 const FINAL_USAGE_WAIT_MS = 250;
 const COMPACTION_MAX_WAIT_MS = 5 * 60_000;
 const AGENT_END_SETTLE_MS = 5_000;
+export const ABORT_SETTLE_TIMEOUT_MS = 10_000;
+export const DEFERRED_END_TIMEOUT_MS = 30_000;
+export const STEER_TIMEOUT_MS = 60_000;
 const MAX_AGENT_END_CORRELATION_MESSAGES = 512;
 const MAX_TRACKED_ENTRY_IDS = 1_024;
 const MAX_UNCLAIMED_BRANCH_ENTRIES = 1_024;
@@ -483,6 +486,8 @@ export class OmpProviderSession {
           normalizedConfig.sessionDir,
         )
       : undefined;
+    const openingTitle = resolveDescriptorTitleForOpen(persistedDescriptor);
+    if (openingTitle !== undefined) effectiveConfig.title = openingTitle;
     validateOmpHostToolConfig(effectiveConfig);
     if (input.config.title && utf8Bytes(input.config.title) > 256) {
       throw new OmpPublicError("OMP session title is too large");
@@ -1459,8 +1464,22 @@ export class OmpProviderSession {
   }
 
   private async settleInterrupt(requestId: string, abort: PendingAbort): Promise<void> {
+    const abortTimeout = Promise.withResolvers<null>();
+    const abortTimer = this.scheduler.set(() => abortTimeout.resolve(null), ABORT_SETTLE_TIMEOUT_MS);
     try {
-      await abort.promise;
+      const abortTimedOut = await Promise.race([
+        abort.promise.then(() => false),
+        abortTimeout.promise.then(() => true),
+      ]);
+      if (abortTimedOut) {
+        this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
+        this.invalidateRuntime("OMP interrupt timed out", "canceled");
+        if (!abort.turn.terminal && this.activeTurn === abort.turn) {
+          await this.finishTurn(abort.turn, "canceled", undefined, true, true);
+        }
+        this.emit({ type: "request.completed", requestId });
+        return;
+      }
       if (
         (abort.turn.terminalizing || abort.forceTerminal) &&
         !abort.turn.terminal &&
@@ -1488,6 +1507,11 @@ export class OmpProviderSession {
         error: providerError(error, "OMP interrupt failed"),
       });
     } finally {
+      try {
+        this.scheduler.clear(abortTimer);
+      } catch {
+        // The one-shot timeout already fired; settle outcome above is authoritative.
+      }
       if (this.activeAbort === abort) this.activeAbort = null;
     }
   }
@@ -2146,7 +2170,21 @@ export class OmpProviderSession {
     turn.steersInFlight += 1;
     this.cancelLocalOnlyCompletion(turn);
     try {
-      await this.runtime.steer(payload.text, payload.images);
+      const steerTimeout = Promise.withResolvers<null>();
+      const steerTimer = this.scheduler.set(() => steerTimeout.resolve(null), STEER_TIMEOUT_MS);
+      try {
+        const steerTimedOut = await Promise.race([
+          this.runtime.steer(payload.text, payload.images).then(() => false),
+          steerTimeout.promise.then(() => true),
+        ]);
+        if (steerTimedOut) throw new OmpPublicError("OMP steer timed out");
+      } finally {
+        try {
+          this.scheduler.clear(steerTimer);
+        } catch {
+          // The one-shot timeout already fired; the throw above is authoritative.
+        }
+      }
       turn.steersInFlight -= 1;
       if (turn.terminal || turn.terminalizing || this.activeTurn !== turn) {
         this.imageMaterializer.release(materializedPaths);
@@ -2920,6 +2958,7 @@ export class OmpProviderSession {
       this.scheduler.clear(turn.agentEndDeadlineTimer);
       turn.agentEndDeadlineTimer = undefined;
     }
+    this.clearDeferredEndDeadline(turn);
   }
   private ignoreActiveTerminalCandidate(turn: ActiveTurn, candidate: TerminalCandidate): void {
     const replacement =
@@ -2985,6 +3024,7 @@ export class OmpProviderSession {
     if (!this.subsessions?.hasActiveChildren()) return false;
     turn.terminalizing = false;
     turn.deferredAgentEnd = candidate;
+    this.armDeferredEndDeadline(turn);
     void this.subsessions.reconcile(this.runtime).catch(() => {
       this.recordOperationalFailure({
         category: "tool-projector",
@@ -2998,6 +3038,29 @@ export class OmpProviderSession {
     return true;
   }
 
+  private armDeferredEndDeadline(turn: ActiveTurn): void {
+    this.clearDeferredEndDeadline(turn);
+    turn.deferredEndDeadlineTimer = this.scheduler.set(() => {
+      turn.deferredEndDeadlineTimer = undefined;
+      if (!turn.interrupted || turn.terminal || this.activeTurn !== turn) return;
+      if (!turn.deferredAgentEnd) return;
+      this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
+      this.subsessions?.terminalize("canceled");
+      turn.deferredAgentEnd = undefined;
+      void this.finishTurn(turn, "canceled", undefined, true, true);
+    }, DEFERRED_END_TIMEOUT_MS);
+  }
+
+  private clearDeferredEndDeadline(turn: ActiveTurn): void {
+    if (turn.deferredEndDeadlineTimer === undefined) return;
+    try {
+      this.scheduler.clear(turn.deferredEndDeadlineTimer);
+    } catch {
+      // The one-shot deadline already fired; its guard clauses are authoritative.
+    }
+    turn.deferredEndDeadlineTimer = undefined;
+  }
+
   private resumeDeferredAgentEnd(): void {
     const turn = this.activeTurn;
     if (!turn || turn.terminal || turn.terminalizing || this.hasTerminalConflict(turn)) {
@@ -3006,6 +3069,7 @@ export class OmpProviderSession {
     const candidate = turn.deferredAgentEnd;
     if (!candidate || candidate.confidence === "ambiguous") return;
     turn.deferredAgentEnd = undefined;
+    this.clearDeferredEndDeadline(turn);
     this.beginTerminalization(turn, candidate);
   }
 
@@ -3256,6 +3320,7 @@ export class OmpProviderSession {
       this.scheduler.clear(turn.agentEndDeadlineTimer);
       turn.agentEndDeadlineTimer = undefined;
     }
+    this.clearDeferredEndDeadline(turn);
     const wake = Promise.withResolvers<void>();
     turn.terminalWake = wake;
     const generation = turn.generation;
