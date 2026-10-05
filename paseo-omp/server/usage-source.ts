@@ -1,18 +1,45 @@
+import { createHash } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import type { UsageAccount, UsageReport, UsageWindow } from "@getpaseo/plugin/server/usage";
-import {
-  hashAccountKey,
-  toneFromUsedPct,
-  unavailable,
-  windowFromUsedPct,
-} from "@getpaseo/plugin/server/usage";
 import { isOmpProfileName, OmpProfileNameSchema } from "../shared/omp-store";
 import type { OmpQuota } from "../shared/quota";
 import { ompCacheDir, ompDataDir, ompStateDir } from "./paths";
 import { listOmpQuotasFrom } from "./quota";
+
+// Inlined from @getpaseo/plugin/server/usage (0.11-only module): the 0.10 daemon
+// bundler rejects that specifier, so these local copies keep semantics identical.
+function windowFromUsedPct(input: {
+  id: string;
+  label: string;
+  utilizationPct?: number | null;
+  resetsAt?: string | null;
+  shortLabel?: string;
+  summary?: boolean;
+  tone?: UsageWindow["tone"];
+}): UsageWindow {
+  const usedPct = typeof input.utilizationPct === "number" ? input.utilizationPct : null;
+  const window: UsageWindow = {
+    id: input.id,
+    label: input.label,
+    usedPct,
+    remainingPct: usedPct === null ? null : Math.max(0, 100 - usedPct),
+    resetsAt: input.resetsAt ?? null,
+  };
+  if (input.shortLabel !== undefined) window.shortLabel = input.shortLabel;
+  if (input.summary) window.summary = true;
+  if (input.tone) window.tone = input.tone;
+  return window;
+}
+
+function toneFromUsedPct(usedPct: number | null): UsageWindow["tone"] {
+  if (typeof usedPct !== "number") return "default";
+  if (usedPct > 90) return "danger";
+  if (usedPct >= 70) return "warning";
+  return "ok";
+}
 
 export const OmpUsageRouteSchema = z
   .object({
@@ -144,7 +171,7 @@ export async function discoverOmpUsage(
 ): Promise<UsageAccount[]> {
   return discoverOmpUsageStores(environment, platform).map((store) => ({
     // Path-derived, never a credential or email; stable across token rotation.
-    key: hashAccountKey(`paseo-omp-usage:${store.dbPath}`),
+    key: createHash("sha256").update(`paseo-omp-usage:${store.dbPath}`).digest("hex"),
     label: store.label,
     input: {
       route: {
@@ -200,10 +227,13 @@ export async function fetchOmpUsage(input: unknown): Promise<UsageReport> {
   const parsed = OmpUsageInputSchema.parse(input);
   const quotas = listOmpQuotasFrom(parsed.route.path);
   if (quotas.length === 0) {
-    return unavailable({
-      kind: "no_quota",
-      detail: "No recorded OMP usage in this store yet",
-    });
+    return {
+      status: "unavailable",
+      problem: {
+        kind: "no_quota",
+        detail: "No recorded OMP usage in this store yet",
+      },
+    };
   }
   return { status: "available", windows: usageWindowsFor(quotas), balances: [], details: [] };
 }
