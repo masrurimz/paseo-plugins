@@ -8,6 +8,7 @@ import type {
   OmpOperationalFailureReporter,
 } from "../operational-failure-diagnostics";
 import { isValidImagePayload } from "./image";
+import { rejectWithHint } from "./instead-hints";
 import {
   type ConnectedMcpClient,
   type ConnectedMcpTool,
@@ -240,7 +241,8 @@ export function validateOmpHostToolConfig(config: ProviderSessionConfig): void {
     throw new OmpPublicError("OMP MCP server count exceeds the supported limit");
   }
   if (config.toolPolicy !== undefined) {
-    throw new OmpPublicError(
+    throw rejectWithHint(
+      "toolPolicy-host-tools",
       "OMP set_host_tools cannot preserve exact MCP policy; refusing to broaden access",
     );
   }

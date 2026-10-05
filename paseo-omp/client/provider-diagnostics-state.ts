@@ -10,6 +10,24 @@ import type {
 import { isOmpProvider } from "./omp-store-state";
 import type { PaseoApi, PaseoProviderSnapshotResult } from "./paseo-types";
 
+import type { AvailabilityDisplay } from "../shared/availability-display";
+import { displayForStatus } from "../shared/availability-display";
+
+export type { AvailabilityDisplay, AvailabilityStatus } from "../shared/availability-display";
+export { displayForStatus, toAvailabilityDisplay } from "../shared/availability-display";
+
+/**
+ * Cache identity the config surface's health query uses for the default store and the
+ * daemon working directory. The Hub sidebar reuses the same key so its availability dot reads an
+ * existing result rather than starting a second probe; it adds no new RPC contract and no timer.
+ */
+export const HUB_AVAILABILITY_QUERY_KEY = [
+  "paseo-omp",
+  "provider-health",
+  "default",
+  "global",
+] as const;
+
 export type ProviderHealthTone = "ok" | "warning" | "danger" | "muted";
 export const OMP_PROVIDER_IDS = ["omp", "omp-plugin"] as const;
 
@@ -258,4 +276,42 @@ export function selectKnownOmpProviders(
         ]
       : [],
   );
+}
+
+export interface PerProfileAvailabilityInput {
+  /** Snapshot entries narrow the candidate profiles; only OMP identities are considered. */
+  providers: readonly PaseoProviderSnapshotResult["entries"][number][];
+  /** Default-binary classification from the already-fetched health result, if any. */
+  defaultDisplay?: AvailabilityDisplay;
+}
+
+/**
+ * Pre-launch availability per OMP profile without a new probe or status registration.
+ *
+ * The `omp`/`omp-plugin` identities reuse the shared default-binary classification. Named
+ * profiles (`omp-plugin-<profile>`) keep plugin-owned launch, so their own
+ * `providerOptions.command` (Doppler/env wrappers included) is the only binary that could
+ * speak for them — and the client never sees per-agent options. The daemon observes each
+ * profile through `checkAvailability` at refresh time and records the outcome on the snapshot
+ * entry, so an entry reading `unavailable`/`error` maps to that profile's own `unrunnable`
+ * copy while every other case stays silent rather than guessing the wrong binary. The custom
+ * command itself is never displayed: all strings are the fixed `AVAILABILITY_COPY` allowlist.
+ */
+export function selectPerProfileAvailability(
+  input: PerProfileAvailabilityInput,
+): Record<string, AvailabilityDisplay> {
+  const known = selectKnownOmpProviders(input.providers);
+  const result: Record<string, AvailabilityDisplay> = {};
+  for (const provider of known) {
+    if (!provider.enabled) continue;
+    const isDefaultProfile = provider.id === "omp" || provider.id === "omp-plugin";
+    if (isDefaultProfile) {
+      if (input.defaultDisplay?.showBadge) result[provider.id] = input.defaultDisplay;
+      continue;
+    }
+    if (provider.status === "unavailable" || provider.status === "error") {
+      result[provider.id] = displayForStatus("unrunnable");
+    }
+  }
+  return result;
 }

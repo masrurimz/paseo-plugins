@@ -128,13 +128,13 @@ test("owned agent directory updates reconcile new agent pills and cached quota r
       return button;
     };
     expect(quota("alpha").update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ visible: true, label: "Quotas · 90%" }),
+      expect.objectContaining({ visible: true, label: "Quotas · 90% (historical)" }),
     );
     expect(quota("team-beta").update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ visible: true, label: "Quotas · 20%" }),
+      expect.objectContaining({ visible: true, label: "Quotas · 20% (historical)" }),
     );
     expect(quota("default").update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ visible: true, label: "Anthropic · 50%" }),
+      expect.objectContaining({ visible: true, label: "Anthropic · 50% (historical)" }),
     );
     expect(quota("codex").update).not.toHaveBeenCalled();
     expect(
@@ -158,7 +158,7 @@ test("owned agent directory updates reconcile new agent pills and cached quota r
     onDirectoryUpdate();
     await vi.advanceTimersByTimeAsync(250);
     expect(quota("alpha").update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ label: "Quotas · 20%" }),
+      expect.objectContaining({ label: "Quotas · 20% (historical)" }),
     );
     expect(rpc.mock.calls.filter(([definition]) => definition === listOmpQuotas)).toHaveLength(3);
   } finally {

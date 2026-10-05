@@ -45,7 +45,7 @@ describe("OMP RPC transport", () => {
           success: true,
           data: {
             models: oversized
-              ? models.map((model) => ({ ...model, extra: Array(512).fill(0) }))
+              ? models.map((model) => ({ ...model, extra: Array(2048).fill(0) }))
               : models,
           },
         });

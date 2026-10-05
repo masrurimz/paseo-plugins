@@ -7,6 +7,7 @@ import { storeForProvider, storeLabel } from "../shared/omp-store";
 import { listOmpQuotas } from "../shared/quota";
 import { ompStoreKey } from "./omp-store-state";
 import {
+  HISTORICAL_PILL_TITLE,
   type QuotaProviderGroup,
   quotaDetailLabel,
   quotaProviderFromSession,
@@ -101,6 +102,9 @@ export function QuotaPopover(props: PluginButtonContentProps) {
   return (
     <View style={styles.root}>
       <Text style={styles.muted}>{storeLabel(store)}</Text>
+      <Text style={styles.muted}>
+        {`${HISTORICAL_PILL_TITLE}. Recorded in the local agent database, not read live from the provider.`}
+      </Text>
       {currentProvider && !hasCurrent ? (
         <Text style={styles.muted}>
           {`No recorded quota yet for ${quotaProviderLabel(currentProvider)} (this session's provider).`}

@@ -325,6 +325,7 @@ export class FakeOmpSession implements OmpRuntimeSession {
   branchThinkingAfter: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null =
     null;
   readonly branches: string[] = [];
+  readonly forks: Array<string | undefined> = [];
   closeGate: Promise<void> | null = null;
   closeObserved: (() => void) | null = null;
   abortGate: Promise<void> | null = null;
@@ -683,6 +684,11 @@ export class FakeOmpSession implements OmpRuntimeSession {
       text: this.branchMessages.find((message) => message.entryId === entryId)?.text ?? "",
       cancelled: this.branchCancelled,
     };
+  }
+
+  async fork(entryId?: string) {
+    this.forks.push(entryId);
+    return { cancelled: false };
   }
 
   async getBranchMessages() {

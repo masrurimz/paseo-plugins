@@ -176,8 +176,11 @@ describe("plugin server bundle", () => {
           registerSettings: (definition: unknown) => settings.push(definition),
           registerProvider: (provider: ProviderRegistration) => providers.push(provider),
         });
-        expect(handlers).toHaveLength(17);
+        expect(handlers).toHaveLength(18);
         expect(handlers.map(([contract]) => contract.name)).toContain("paseo-omp.list-models");
+        expect(handlers.map(([contract]) => contract.name)).toContain(
+          "paseo-omp.get-support-bundle",
+        );
         expect(settings).toEqual([
           expect.objectContaining({ id: "composer-pills", scope: "host", version: 1 }),
           expect.objectContaining({ id: "provider-launch", scope: "host", version: 1 }),

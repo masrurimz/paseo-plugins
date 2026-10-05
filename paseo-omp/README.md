@@ -95,7 +95,7 @@ Provider functionality outside the capability flags is tracked separately:
 | --- | ---: | --- |
 | Registration metadata and sanitized SVG icon | **100%** | Stable `omp-plugin` identity, label, description, and bundled icon. |
 | Strict `providerOptionsSchema` | **100%** | Command, literal environment, names-only profile inherited environment, output-redaction mode, session directory, RPC timeout, and role-model options are validated and normalized. Host-wide inherited names are separately persisted and merged at launch. |
-| Availability diagnostics | **50%** | The plugin implements a `checkAvailability` hook with bounded checks that distinguish missing, unrunnable, incompatible, and available OMP runtimes, but no released daemon calls it (no upstream reference at v0.10.2 or v0.11.0-beta.3). Hosts treat the provider as available when a connection opens, and launch failures surface at session start. |
+| Availability diagnostics | **50%** | The plugin implements a `checkAvailability` hook with bounded checks that distinguish missing, unrunnable, incompatible, and available OMP runtimes, but no released daemon calls it (no upstream reference at v0.10.2 or v0.11.0-beta.3). `shared/availability-display.ts` surfaces the same four states pre-launch from existing health without a new probe or output leak, keyed on the daemon-default binary; custom-command agents still probe their own binary server-side. Hosts treat the provider as available when a connection opens, and launch failures surface at session start. `status()` stays unregistered by design. |
 | Catalog cache identity | **100%** | Hash includes effective options, merged host/profile inherited-environment names, settings, scope, cwd, and default command, but never resolves or fingerprints inherited values. |
 | Models, modes, and thinking catalog | **100%** | Native catalog is mapped to opaque public model IDs with committed defaults and permission-gated modes. |
 | Connection `send` / `onEvent` / `close` lifecycle | **100%** | Request correlation, multi-session ownership, process recovery, teardown, and provider reload/removal are covered. |
@@ -107,7 +107,7 @@ Provider functionality outside the capability flags is tracked separately:
 | Usage reporting | **100%** | Periodic, post-compaction, fallback, terminal, timeout, and recovered-runtime samples publish `session.usage`. |
 | 0.11 provider `status()` | **0%** | Not registered. Its request carries only an optional daemon-resolved `launch`; the daemon supplies one only when a registration declares `command`, which would move launch ownership to the daemon. Without that, status cannot see per-agent `providerOptions.command`, so probing a guessed default could wrongly mark a valid custom-command provider unavailable. |
 | 0.11 screens and sidebar items | **100%** | The global config surface migrates to `addScreen({ id: "config" })`, preserving legacy links and encoding profile selection in screen params. The Hub status row uses `addSidebarHeaderItem` + `SidebarRow`, lists processes and tails logs in a reusable popover. Hosts without the 0.11 APIs retain the static config row/surface; the Hub row is 0.11-only. |
-| 0.11 usage source | **0%** | Not registered. `server/quota.ts` reads OMP's recorded `usage_history`, not live quota, so there is no live fetcher to register. Upstream Claude and Codex sources fetch live quota for the Anthropic and Codex OAuth credentials in the daemon's default or `OMP_PROFILE` store; other providers and named profiles remain covered only by this plugin's historical quota pill. |
+| 0.11 usage source | **100%** | Registered as `omp-usage` on 0.11 hosts with a `typeof` guard so 0.9.2 and 0.10 hosts keep the historical pill. `server/usage-source.ts` discovers default, `OMP_PROFILE`, XDG, and named-profile stores read-only and `fetch` maps latest `usage_history` rows to live `UsageReport` windows, or `unavailable` when no rows exist. Historical `server/quota.ts` remains the fallback. |
 
 Tracking rules:
 
@@ -115,6 +115,7 @@ Tracking rules:
 2. Raise a row only when the provider advertises the capability and an observable contract test covers its success and failure boundaries.
 3. Keep native-agent limitations at less than 100% even when the adapter itself is complete; do not count undocumented fallbacks as support.
 4. Keep the detailed evidence and regression locations in [TESTING.md](TESTING.md); this README is the public progress ledger.
+5. Record one wire-diff outcome per OMP release. `node scripts/omp-wire-diff.mjs --omp <rpc-wire.schema.json> --protocol server/provider/omp-rpc-protocol.ts` prints a `clean` / `additive-optional` / `additive-required` / `removed-or-renamed` / `type-change` table and exits 2 on release-blocking drift; attach that table to the scoring change so the release stays comparable.
 
 ## Compatibility and coexistence
 

@@ -1,13 +1,16 @@
 import { settingsRpc } from "@getpaseo/plugin";
 import type {
+  PluginButton,
+  PluginButtonContentProps,
   PluginButtonRegistration,
   PluginClientContext,
   PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
 import type { ComponentType } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { OmpIcon } from "./client/hub-icon";
 import { HubPopover } from "./client/hub-popover";
-import { ConfigSidebarItem, createHubSidebar } from "./client/hub-sidebar";
+import { ConfigSidebarItem, createHubSidebar, PillFreshnessBanner } from "./client/hub-sidebar";
 import { summarizeHubProcesses } from "./client/hub-status";
 import { OmpMcpAuthorizationCard } from "./client/mcp-authorization";
 import { McpPopover } from "./client/mcp-popover";
@@ -21,10 +24,21 @@ import {
   ompStoreKey,
 } from "./client/omp-store-state";
 import type { PaseoAgentListResult, PaseoApi } from "./client/paseo-types";
+import {
+  createFreshnessStore,
+  freshnessKey,
+  PILL_POLL_MS,
+  type PillFreshness,
+  type PillKind,
+  type PillLabel,
+  pillLabelFor,
+  transition,
+} from "./client/pill-freshness";
 import { quotaProviderIcon } from "./client/provider-icon";
 import { OmpImageTimeline } from "./client/provider-image";
 import { QuotaPopover } from "./client/quota-popover";
 import {
+  historicalQuotaPillLabel,
   type QuotaSeverity,
   quotaProviderFromSession,
   quotaSeverityForProvider,
@@ -53,8 +67,6 @@ import { listOmpQuotas } from "./shared/quota";
 
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 10;
-const STATUS_POLL_MS = 4_000;
-const QUOTA_POLL_MS = 30_000;
 const RECONCILE_DEBOUNCE_MS = 250;
 const SETTINGS_POLL_MS = 15_000;
 const composerPillSettingsRpc = settingsRpc(composerPillSettings.id);
@@ -68,6 +80,9 @@ type PillEntry = {
   workspaceId: string;
   quotaProvider: string | null;
   quotaSeverity: QuotaSeverity;
+  /** Last successful labels, retained through failures so error/stale annotate, never clear. */
+  hubLabel: PillLabel;
+  quotaLabel: PillLabel;
   hub?: PluginButtonRegistration;
   memory?: PluginButtonRegistration;
   sessions?: PluginButtonRegistration;
@@ -176,6 +191,7 @@ export function registerConfigAndHub(
 
 export default function contribute(client: PluginClientContext) {
   const pills = new Map<string, PillEntry>();
+  const freshness = createFreshnessStore();
   let preferences: ComposerPillSettings | undefined;
   let disposed = false;
   let reconcileTimer: ReturnType<typeof setTimeout> | undefined;
@@ -186,11 +202,96 @@ export default function contribute(client: PluginClientContext) {
   let settingsReadRunning = false;
   let settingsGeneration = 0;
 
+  function recordFreshness(agentId: string, kind: PillKind, ok: boolean): PillFreshness {
+    const key = freshnessKey(agentId, kind);
+    const next = transition(
+      freshness.get(key),
+      ok ? { type: "poll:success", at: Date.now() } : { type: "poll:error", at: Date.now() },
+    );
+    freshness.set(key, next);
+    return next;
+  }
+
+  /** Re-derives a pill's label from its last-known summary plus the freshness machine. */
+  function applyPillLabel(
+    agentId: string,
+    kind: PillKind,
+    entry: PillEntry,
+    handle: PluginButtonRegistration,
+    patch?: Partial<PluginButton>,
+  ): void {
+    const base = kind === "hub" ? entry.hubLabel : entry.quotaLabel;
+    const freshnessState = freshness.get(freshnessKey(agentId, kind));
+    handle.update({ ...pillLabelFor(kind, base, freshnessState), ...patch });
+  }
+
+  /**
+   * Every poll tick re-annotates labels so a stalled refresh paints its stale suffix. Pills with
+   * no recorded outcome keep the base label, so they are skipped.
+   */
+  function annotatePillLabels(kind: PillKind): void {
+    for (const [agentId, entry] of pills) {
+      const handle = kind === "hub" ? entry.hub : entry.quota;
+      if (!handle) continue;
+      if (!freshness.has(freshnessKey(agentId, kind))) continue;
+      applyPillLabel(agentId, kind, entry, handle);
+    }
+  }
+
+  function forgetFreshness(agentId: string): void {
+    freshness.remove(freshnessKey(agentId, "hub"));
+    freshness.remove(freshnessKey(agentId, "quota"));
+  }
+
   function applyComposerPillSettings(next: ComposerPillSettings): void {
     if (samePillSettings(preferences, next)) return;
     preferences = next;
     settingsGeneration += 1;
     scheduleReconcile();
+  }
+
+  function useFreshness(agentId: string, kind: PillKind): PillFreshness {
+    return useSyncExternalStore(
+      useCallback(
+        (listener: () => void) => freshness.subscribe(freshnessKey(agentId, kind), listener),
+        [agentId, kind],
+      ),
+      useCallback(() => freshness.get(freshnessKey(agentId, kind)), [agentId, kind]),
+    );
+  }
+
+  /** Hub pill popover: the existing content plus a freshness banner when it is not fresh. */
+  function HubPillPopover(props: PluginButtonContentProps) {
+    const agentId = props.context === "agent" ? props.agentId : "";
+    const state = useFreshness(agentId, "hub");
+    return (
+      <>
+        <PillFreshnessBanner
+          kind="hub"
+          state={state}
+          theme={props.theme}
+          onRetry={() => void refreshHubStatus()}
+        />
+        <HubPopover {...props} />
+      </>
+    );
+  }
+
+  /** Quota pill popover: the existing content plus a freshness banner when it is not fresh. */
+  function QuotaPillPopover(props: PluginButtonContentProps) {
+    const agentId = props.context === "agent" ? props.agentId : "";
+    const state = useFreshness(agentId, "quota");
+    return (
+      <>
+        <PillFreshnessBanner
+          kind="quota"
+          state={state}
+          theme={props.theme}
+          onRetry={() => void refreshQuotaStatus()}
+        />
+        <QuotaPopover {...props} />
+      </>
+    );
   }
 
   function ConfigSurface(props: PluginSurfaceProps) {
@@ -269,7 +370,7 @@ export default function contribute(client: PluginClientContext) {
   });
   const loadStoreQuotas = createStoreQuotaLoader(
     (input) => client.rpc(listOmpQuotas, input),
-    QUOTA_POLL_MS,
+    PILL_POLL_MS.quota,
   );
 
   function syncAgentPills(entry: PillEntry, agent: AgentEntry["agent"]): void {
@@ -303,7 +404,7 @@ export default function contribute(client: PluginClientContext) {
           icon: OmpIcon,
           label: "Hub",
           visible: false,
-          behavior: { kind: "popover", Content: HubPopover },
+          behavior: { kind: "popover", Content: HubPillPopover },
         },
       });
     } else {
@@ -355,7 +456,7 @@ export default function contribute(client: PluginClientContext) {
           icon: quotaProviderIcon(entry.quotaProvider, "unknown"),
           label: "Quota",
           visible: false,
-          behavior: { kind: "popover", Content: QuotaPopover },
+          behavior: { kind: "popover", Content: QuotaPillPopover },
         },
       });
     } else {
@@ -384,7 +485,10 @@ export default function contribute(client: PluginClientContext) {
         entry.quotaProvider !== quotaProvider ||
         ompStoreKey(entry.store) !== ompStoreKey(store)
       ) {
-        if (entry) removePills(entry);
+        if (entry) {
+          removePills(entry);
+          forgetFreshness(agent.id);
+        }
         entry = {
           store,
           cwd: agent.cwd,
@@ -392,6 +496,8 @@ export default function contribute(client: PluginClientContext) {
           workspaceId: agent.workspaceId,
           quotaProvider,
           quotaSeverity: "unknown",
+          hubLabel: { visible: false, label: "Hub" },
+          quotaLabel: { visible: false, label: "Quota" },
         };
         pills.set(agent.id, entry);
       }
@@ -400,6 +506,7 @@ export default function contribute(client: PluginClientContext) {
     for (const [agentId, entry] of pills) {
       if (activeIds.has(agentId)) continue;
       removePills(entry);
+      forgetFreshness(agentId);
       pills.delete(agentId);
     }
     await Promise.all([refreshHubStatus(), refreshQuotaStatus()]);
@@ -422,6 +529,8 @@ export default function contribute(client: PluginClientContext) {
   }
 
   async function refreshHubStatus(): Promise<void> {
+    // A stalled or in-flight refresh still re-annotates: that is what paints the stale suffix.
+    annotatePillLabels("hub");
     if (hubRefreshRunning || !preferences?.hub) return;
     const pillsByCwd = new Map<
       string,
@@ -445,10 +554,20 @@ export default function contribute(client: PluginClientContext) {
             const summary = summarizeHubProcesses(result.processes);
             for (const { agentId, entry, handle } of targets) {
               const current = pills.get(agentId);
-              if (current === entry && current.hub === handle) handle.update(summary);
+              if (current !== entry || current.hub !== handle) continue;
+              recordFreshness(agentId, "hub", true);
+              entry.hubLabel = summary;
+              applyPillLabel(agentId, "hub", entry, handle);
             }
           } catch {
-            // Preserve the last known state through temporary host and workspace failures.
+            // Preserve the last known state through temporary host and workspace failures,
+            // annotating it as un-refreshed rather than clearing it.
+            for (const { agentId, entry, handle } of targets) {
+              const current = pills.get(agentId);
+              if (current !== entry || current.hub !== handle) continue;
+              recordFreshness(agentId, "hub", false);
+              applyPillLabel(agentId, "hub", entry, handle);
+            }
           }
         }),
       );
@@ -458,6 +577,8 @@ export default function contribute(client: PluginClientContext) {
   }
 
   async function refreshQuotaStatus(): Promise<void> {
+    // A stalled or in-flight refresh still re-annotates: that is what paints the stale suffix.
+    annotatePillLabels("quota");
     if (quotaRefreshRunning || !preferences?.quota) return;
     const groups = new Map<
       string,
@@ -483,8 +604,11 @@ export default function contribute(client: PluginClientContext) {
               const current = pills.get(agentId);
               if (current !== entry || current.quota !== handle) continue;
               const severity = quotaSeverityForProvider(result.quotas, entry.quotaProvider, true);
-              handle.update({
-                ...quotaSummaryForProvider(result.quotas, entry.quotaProvider, true),
+              recordFreshness(agentId, "quota", true);
+              entry.quotaLabel = historicalQuotaPillLabel(
+                quotaSummaryForProvider(result.quotas, entry.quotaProvider, true),
+              );
+              applyPillLabel(agentId, "quota", entry, handle, {
                 ...(severity === entry.quotaSeverity
                   ? {}
                   : { icon: quotaProviderIcon(entry.quotaProvider, severity) }),
@@ -492,7 +616,14 @@ export default function contribute(client: PluginClientContext) {
               entry.quotaSeverity = severity;
             }
           } catch {
-            // Retain only this store's last result. Failure never falls back to another profile.
+            // Retain only this store's last result. Failure never falls back to another profile,
+            // and the retained label is annotated rather than cleared.
+            for (const { agentId, entry, handle } of targets) {
+              const current = pills.get(agentId);
+              if (current !== entry || current.quota !== handle) continue;
+              recordFreshness(agentId, "quota", false);
+              applyPillLabel(agentId, "quota", entry, handle);
+            }
           }
         }),
       );
@@ -545,10 +676,10 @@ export default function contribute(client: PluginClientContext) {
     .catch(() => {});
   const hubPoll = setInterval(() => {
     void refreshHubStatus();
-  }, STATUS_POLL_MS);
+  }, PILL_POLL_MS.hub);
   const quotaPoll = setInterval(() => {
     void refreshQuotaStatus();
-  }, QUOTA_POLL_MS);
+  }, PILL_POLL_MS.quota);
   const settingsPoll = setInterval(() => {
     void refreshComposerPillSettings();
   }, SETTINGS_POLL_MS);

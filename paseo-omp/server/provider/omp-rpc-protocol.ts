@@ -128,6 +128,7 @@ export const OMP_RPC_COMMAND_POLICIES = {
   export_html: "unsupported",
   switch_session: "unsupported",
   branch: "implemented",
+  fork: "implemented",
   get_branch_messages: "implemented",
   get_last_assistant_text: "unsupported",
   set_session_name: "unsupported",
@@ -601,6 +602,7 @@ export const OMP_RPC_DIAGNOSTIC_COMMANDS = [
   "handoff",
   "get_branch_messages",
   "branch",
+  "fork",
   "get_messages_page",
   "get_messages",
   "abort",
@@ -1861,6 +1863,8 @@ export const OmpBranchMessagesResultSchema = z.object({
   messages: z.array(z.object({ entryId: IDENTIFIER, text: TEXT })).max(1_024),
 });
 export const OmpBranchResultSchema = z.object({ text: TEXT, cancelled: z.boolean() });
+export const OmpForkParamsSchema = z.object({ entryId: IDENTIFIER.optional() }).strict();
+export const OmpForkResultSchema = z.object({ cancelled: z.boolean() }).strict();
 export const OmpMessagesResultSchema = z.object({
   messages: z.array(OmpMessageSchema).max(MAX_REPLAY_MESSAGES),
 });
@@ -1902,6 +1906,8 @@ export const ProtocolNegotiationResultSchema = z.object({
 
 export type OmpModel = z.infer<typeof OmpModelSchema>;
 export type OmpBranchResult = z.infer<typeof OmpBranchResultSchema>;
+export type OmpForkParams = z.infer<typeof OmpForkParamsSchema>;
+export type OmpForkResult = z.infer<typeof OmpForkResultSchema>;
 export type OmpSessionState = z.infer<typeof OmpSessionStateSchema>;
 export type OmpSessionStats = z.infer<typeof OmpSessionStatsSchema>;
 export type OmpCompactionResult = z.infer<typeof OmpCompactionResultSchema>;

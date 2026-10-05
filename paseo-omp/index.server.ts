@@ -28,7 +28,9 @@ import { OmpPublicError } from "./server/provider/security";
 import { resolveGetOmpProviderHealth } from "./server/provider-diagnostics";
 import { resolveListOmpQuotas } from "./server/quota";
 import { resolveListOmpSessions } from "./server/sessions";
+import { resolveGetOmpSupportBundle } from "./server/support-bundle";
 import { resolveGetOmpSupportReport } from "./server/support-diagnostics";
+import { discoverOmpUsage, fetchOmpUsage, OmpUsageInputSchema } from "./server/usage-source";
 import { composerPillSettings } from "./shared/composer-pill-settings";
 import { listHubProcesses, tailHubLog } from "./shared/hub";
 import { openOmpMcpAuthorizationInPaseoBrowser } from "./shared/mcp";
@@ -47,6 +49,7 @@ import { getOmpProviderHealth } from "./shared/provider-diagnostics";
 import { providerLaunchSettings } from "./shared/provider-launch-settings";
 import { listOmpQuotas } from "./shared/quota";
 import { listOmpSessions } from "./shared/sessions";
+import { getOmpSupportBundle } from "./shared/support-bundle";
 import { getOmpSupportReport } from "./shared/support-diagnostics";
 
 function scoped<T extends { store?: OmpStore }, R>(handler: (input: T) => R) {
@@ -55,6 +58,16 @@ function scoped<T extends { store?: OmpStore }, R>(handler: (input: T) => R) {
 
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(composerPillSettings);
+  // registerUsageSource is a 0.11 host API; older hosts keep the historical quota pill.
+  if (typeof server.registerUsageSource === "function") {
+    server.registerUsageSource({
+      id: "omp-usage",
+      label: "OMP",
+      input: OmpUsageInputSchema,
+      discover: () => discoverOmpUsage(),
+      fetch: fetchOmpUsage,
+    });
+  }
   const launchSettings = server.registerSettings(providerLaunchSettings);
   const resolveHostInheritEnv = async (): Promise<readonly string[]> => {
     const current = await launchSettings.read();
@@ -93,6 +106,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(
     getOmpSupportReport,
     scoped((input) => resolveGetOmpSupportReport(input, protocolViolations, operationalFailures)),
+  );
+  server.handle(
+    getOmpSupportBundle,
+    scoped((input) => resolveGetOmpSupportBundle(input, protocolViolations, operationalFailures)),
   );
   server.handle(openOmpMcpAuthorizationInPaseoBrowser, (input) =>
     resolveOpenOmpMcpAuthorizationInPaseoBrowser(input, browserAuthorizationRegistry),

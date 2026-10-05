@@ -554,6 +554,19 @@ reader.on("line", (line) => {
       history = [{ role: "user", content: "replayed question", entryId: "user-root" }];
       respond(command, { text: "replayed question", cancelled: false });
       break;
+    case "fork":
+      if (process.env.PASEO_OMP_FAKE_NO_FORK === "1") {
+        send({
+          type: "response",
+          id: command.id,
+          command: command.type,
+          success: false,
+          error: "Unknown command: fork",
+        });
+        break;
+      }
+      respond(command, { cancelled: true });
+      break;
     case "get_subagents":
       respond(command, { subagents: [] });
       break;

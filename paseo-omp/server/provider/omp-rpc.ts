@@ -15,6 +15,9 @@ import {
   OmpBranchMessagesResultSchema,
   type OmpBranchResult,
   OmpBranchResultSchema,
+  OmpForkParamsSchema,
+  type OmpForkResult,
+  OmpForkResultSchema,
   type OmpCompactionResult,
   OmpCompactionResultSchema,
   type OmpExtensionUiResponse,
@@ -63,6 +66,7 @@ import {
   OmpThinkingLevelSchema,
   validateBoundedText,
 } from "./omp-rpc-values";
+import { rejectWithHint } from "./instead-hints";
 import { buildOmpPromptRequest } from "./prompt-payload";
 import { OmpCleanupFailure, OmpPublicError } from "./security";
 import {
@@ -120,6 +124,7 @@ export interface OmpRuntimeSession {
   respondToToolApproval(response: OmpToolApprovalResponse): Promise<void>;
   getBranchMessages(): Promise<Array<{ entryId: string; text: string }>>;
   branch(entryId: string): Promise<OmpBranchResult>;
+  fork(entryId?: string): Promise<OmpForkResult>;
   readonly canReplayHistory: boolean;
   getMessages(signal?: AbortSignal): Promise<OmpMessage[]>;
   abort(): Promise<void>;
@@ -477,6 +482,25 @@ class OmpRpcSession implements OmpRuntimeSession {
     );
     if (!result.success) throw new Error("OMP RPC response is invalid");
     return result.data;
+  }
+  async fork(entryId?: string): Promise<OmpForkResult> {
+    const params =
+      entryId === undefined
+        ? {}
+        : { entryId: validateBoundedText(entryId, "fork entry identifier", MAX_ID_LENGTH) };
+    const parsedParams = OmpForkParamsSchema.parse(params);
+    try {
+      const result = OmpForkResultSchema.safeParse(
+        await this.process.request({ type: "fork", ...parsedParams }),
+      );
+      if (!result.success) throw new Error("OMP RPC response is invalid");
+      return result.data;
+    } catch (error) {
+      if (error instanceof OmpRpcRequestRejectedError && error.code === "unsupported_command") {
+        throw rejectWithHint("fork-needs-floor", "OMP fork requires OMP past 18.4.11");
+      }
+      throw error;
+    }
   }
 
   async setHostTools(tools: readonly OmpHostToolDefinition[]): Promise<string[]> {

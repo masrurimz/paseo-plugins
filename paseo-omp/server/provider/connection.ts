@@ -16,6 +16,7 @@ import type {
 import { discoverOmpCatalog } from "./catalog";
 import { normalizeOmpCatalogOptions } from "./config-normalization";
 import type { OmpMcpConnector } from "./host-tools";
+import { rejectDetails, rejectWithHint } from "./instead-hints";
 import type { OmpRuntime } from "./omp-rpc";
 import {
   OMP_RPC_BOUND_DIMENSIONS,
@@ -136,10 +137,10 @@ function preflightProviderInput(input: unknown): void {
       }
     }
     if (config?.toolPolicy !== undefined) {
-      throw new OmpPublicError("OMP does not support host tool policies");
+      throw rejectWithHint("toolPolicy-at-open", "OMP does not support host tool policies");
     }
     if (hasOwnEntries(config?.settings)) {
-      throw new OmpPublicError("OMP does not expose live provider settings");
+      throw rejectWithHint("live-settings", "OMP does not expose live provider settings");
     }
   }
   if (record.type === "catalog" || record.type === "sessions") {
@@ -165,7 +166,10 @@ function preflightProviderInput(input: unknown): void {
       throw new OmpPublicError("Prompt output schema is too large");
     }
     if (prompt?.outputSchema !== undefined || prompt?.clearPendingPermissions === true) {
-      throw new OmpPublicError("OMP does not support structured output or permission controls");
+      throw rejectWithHint(
+        "outputSchema",
+        "OMP does not support structured output or permission controls",
+      );
     }
   }
   if (record.type === "session.permission") {
@@ -718,7 +722,7 @@ export function createOmpConnection(
   resolveHostInheritEnv?: () => Promise<readonly string[]>,
 ): ProviderConnection {
   const errorDetails = (error: unknown, fallback: string): { message: string } => {
-    if (isOmpPublicError(error)) return { message: error.message };
+    if (isOmpPublicError(error)) return rejectDetails(error, error.message);
     // The generated ID is the only correlation value we log. It also travels in the public
     // request failure, avoiding any assumption that a caller-supplied request ID is value-safe.
     const diagnosticId = randomUUID();

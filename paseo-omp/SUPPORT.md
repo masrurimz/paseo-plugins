@@ -12,7 +12,7 @@ After the failure is isolated:
 - report a Paseo plugin SDK, loader, or provider-protocol defect to [Paseo](https://github.com/getpaseo/paseo/issues);
 - keep adaptation, packaging, and cross-project compatibility work in this repository.
 
-Do not put credentials, private repository paths, session transcripts, or unredacted RPC payloads in an issue. Report vulnerabilities through the [private GitHub Security Advisory form](https://github.com/omercnet/paseo-plugins/security/advisories/new), not a public issue.
+Do not put credentials, private repository paths, session transcripts, or unredacted RPC payloads in an issue. If a maintainer asks for a transcript excerpt, use **Copy bundle** in **OMP → Help**. It appends an opt-in 32 KiB journal excerpt to the same report, and you must review and redact that excerpt before pasting it. Report vulnerabilities through the [private GitHub Security Advisory form](https://github.com/omercnet/paseo-plugins/security/advisories/new), not a public issue.
 
 ## Supported versions
 

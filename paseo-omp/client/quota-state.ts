@@ -158,3 +158,15 @@ export function quotaDetailLabel(quota: OmpQuota, nowMs: number = Date.now()): s
     .filter(Boolean)
     .join(" · ");
 }
+
+export const HISTORICAL_SUFFIX = "(historical)";
+
+export const HISTORICAL_PILL_TITLE = "Historical quota snapshot (usage_history)";
+
+export function historicalQuotaPillLabel(summary: { visible: boolean; label: string }): {
+  visible: boolean;
+  label: string;
+} {
+  if (summary.label.endsWith(HISTORICAL_SUFFIX)) return summary;
+  return { visible: summary.visible, label: `${summary.label} ${HISTORICAL_SUFFIX}` };
+}
