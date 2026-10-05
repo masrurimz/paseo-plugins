@@ -3,7 +3,35 @@ import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
-import type { UsageAccount, UsageReport, UsageWindow } from "@getpaseo/plugin/server/usage";
+import type { JsonValue } from "./provider/security";
+
+// Local mirrors of @getpaseo/plugin/server/usage (0.11-only module): the 0.10
+// daemon bundler rejects that specifier even for type imports, so these
+// structural copies keep the bundle building on 0.9/0.10/0.11 hosts.
+type UsageTone = "default" | "ok" | "warning" | "danger";
+interface UsageWindow {
+  id: string;
+  label: string;
+  shortLabel?: string;
+  summary?: boolean;
+  usedPct?: number | null;
+  remainingPct?: number | null;
+  resetsAt?: string | null;
+  tone?: UsageTone;
+}
+type UsageProblem =
+  | { kind: "expired"; expiresAt: string; refreshedBy?: string }
+  | { kind: "rejected"; status: number; refreshedBy?: string }
+  | { kind: "no_quota"; detail: string };
+type UsageReport =
+  | { status: "available"; windows: UsageWindow[]; balances?: []; details?: [] }
+  | { status: "unavailable"; problem: UsageProblem }
+  | { status: "error"; error: string };
+interface UsageAccount {
+  key: string;
+  label?: string;
+  input: JsonValue;
+}
 import { isOmpProfileName, OmpProfileNameSchema } from "../shared/omp-store";
 import type { OmpQuota } from "../shared/quota";
 import { ompCacheDir, ompDataDir, ompStateDir } from "./paths";
