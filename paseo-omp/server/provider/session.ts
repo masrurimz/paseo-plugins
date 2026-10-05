@@ -1481,10 +1481,17 @@ export class OmpProviderSession {
         return;
       }
       if (
-        (abort.turn.terminalizing || abort.forceTerminal) &&
+        (abort.turn.terminalizing ||
+          abort.forceTerminal ||
+          abort.turn.deferredAgentEnd !== undefined) &&
         !abort.turn.terminal &&
         this.activeTurn === abort.turn
       ) {
+        if (abort.turn.deferredAgentEnd !== undefined) {
+          this.subsessions?.terminalize("canceled");
+          abort.turn.deferredAgentEnd = undefined;
+          this.clearDeferredEndDeadline(abort.turn);
+        }
         await this.finishTurn(abort.turn, "canceled", undefined, true, true);
       }
       this.emit({ type: "request.completed", requestId });

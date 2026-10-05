@@ -6,6 +6,7 @@ import {
 } from "../server/provider/session";
 import {
   createHarness,
+  establishTerminalOwnership,
   FakeOmpRuntime,
   ManualScheduler,
   openSession,
@@ -91,16 +92,62 @@ describe("OMP bounded stop paths", () => {
     await events.waitFor(
       (event) => event.type === "request.completed" && event.requestId === "stop-deferred",
     );
-    expect(
-      events.some(
-        (event) =>
-          event.type === "session.turn" &&
-          event.turnId === turnId &&
-          event.state !== "started",
-      ),
-    ).toBe(false);
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "canceled" }));
     await scheduler.flush(DEFERRED_END_TIMEOUT_MS);
     await scheduler.flush();
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+      ),
+    ).toHaveLength(1);
+    await connection.close();
+  });
+
+  test("a deferred parent with a live child force-finishes after Stop", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness(
+      new FakeOmpRuntime(),
+      new ManualScheduler(),
+      ["prompt.message", "session.subsession"],
+    );
+    await openSession(connection, events);
+    const session = sessionAt(runtime);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "deferred-live-stop", "work"));
+    const child = {
+      id: "deferred-live-child",
+      agent: "scout",
+      status: "running" as const,
+      sessionFile: "/sessions/root/deferred-live.jsonl",
+      parentToolCallId: "deferred-live-task",
+      lastUpdate: 1,
+      index: 0,
+    };
+    session.subagents = [child];
+    session.emit({ type: "subagent_lifecycle", payload: { ...child, status: "started" } });
+    establishTerminalOwnership(session);
+    session.emit({ type: "agent_end", messages: [], isTerminal: true });
+    await scheduler.flush(DEFERRED_END_TIMEOUT_MS);
+    await scheduler.flush();
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+      ),
+    ).toEqual([]);
+    const interrupted = connection.send({
+      type: "session.interrupt",
+      requestId: "stop-deferred-live",
+      sessionId: "session-1",
+    });
+    await scheduler.flush();
+    await interrupted;
+    await events.waitFor(
+      (event) => event.type === "request.completed" && event.requestId === "stop-deferred-live",
+    );
     const terminal = await events.waitFor(
       (event) =>
         event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
@@ -108,6 +155,7 @@ describe("OMP bounded stop paths", () => {
     expect(terminal).toEqual(expect.objectContaining({ state: "canceled" }));
     await connection.close();
   });
+
 
   test("a hung branch-message lookup still lets agent_end terminalize", async () => {
     const { connection, events, runtime, scheduler } = await createHarness();

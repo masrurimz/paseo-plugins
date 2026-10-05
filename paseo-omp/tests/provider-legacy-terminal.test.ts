@@ -71,6 +71,30 @@ describe("OMP direct provider", () => {
     await connection.close();
   });
 
+  test("settles an ambiguous terminal past a hung branch-message lookup", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness();
+    await openSession(connection, events);
+    const session = sessionAt(runtime);
+    session.promptAgentInvoked = undefined;
+    const turnId = turnIdFrom(
+      await startPrompt(connection, events, "ambiguous-hung-branch", "hello"),
+    );
+    session.branchMessagesGate = new Promise<void>(() => {});
+    session.emit({ type: "message_end", message: { role: "user", content: "hello" } });
+    session.emit({ type: "agent_end", messages: [], isTerminal: true });
+    await scheduler.flush(2_000);
+    await scheduler.flush();
+    await expect(
+      events.waitFor(
+        (event) =>
+          event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+      ),
+    ).resolves.toEqual(expect.objectContaining({ state: "canceled" }));
+    expect(session.branchMessageLookups).toBe(1);
+    await connection.close();
+  });
+
+
   test("lets an exact terminal retire an in-flight ambiguity probe", async () => {
     const { connection, events, runtime, scheduler } = await createHarness();
     await openSession(connection, events);
