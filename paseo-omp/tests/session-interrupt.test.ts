@@ -156,6 +156,79 @@ describe("OMP bounded stop paths", () => {
     await connection.close();
   });
 
+  test("stop on a deferred turn with a failing abort still force-finishes", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness(
+      new FakeOmpRuntime(),
+      new ManualScheduler(),
+      ["prompt.message", "session.subsession"],
+    );
+    await openSession(connection, events);
+    const session = sessionAt(runtime);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "deferred-dead-stop", "work"));
+    const child = {
+      id: "deferred-dead-child",
+      agent: "scout",
+      status: "running" as const,
+      sessionFile: "/sessions/root/deferred-dead.jsonl",
+      parentToolCallId: "deferred-dead-task",
+      lastUpdate: 1,
+      index: 0,
+    };
+    session.subagents = [child];
+    session.emit({ type: "subagent_lifecycle", payload: { ...child, status: "started" } });
+    establishTerminalOwnership(session);
+    session.emit({ type: "agent_end", messages: [], isTerminal: true });
+    await scheduler.flush(DEFERRED_END_TIMEOUT_MS);
+    await scheduler.flush();
+    session.abortError = new Error("native abort rejected");
+    const interrupted = connection.send({
+      type: "session.interrupt",
+      requestId: "stop-deferred-dead",
+      sessionId: "session-1",
+    });
+    await scheduler.flush();
+    await interrupted;
+    await events.waitFor(
+      (event) => event.type === "request.completed" && event.requestId === "stop-deferred-dead",
+    );
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "canceled" }));
+    await connection.close();
+  });
+
+  test("a stop-acknowledged turn that never ends is reaped", async () => {
+    const { connection, events, scheduler } = await createHarness();
+    await openSession(connection, events);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "reap-silent", "work"));
+    const interrupted = connection.send({
+      type: "session.interrupt",
+      requestId: "stop-reap-silent",
+      sessionId: "session-1",
+    });
+    await scheduler.flush();
+    await interrupted;
+    await events.waitFor(
+      (event) => event.type === "request.completed" && event.requestId === "stop-reap-silent",
+    );
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+      ),
+    ).toEqual([]);
+    // POST_ABORT_SETTLE_MS (30s): the reaper, not any runtime event, settles the turn.
+    await scheduler.flush(30_000);
+    await scheduler.flush();
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "canceled" }));
+    await connection.close();
+  });
 
   test("a hung branch-message lookup still lets agent_end terminalize", async () => {
     const { connection, events, runtime, scheduler } = await createHarness();

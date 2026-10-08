@@ -60,6 +60,7 @@ export type ActiveTurn = {
   agentEndRetryTimer?: unknown;
   agentEndDeadlineTimer?: unknown;
   deferredEndDeadlineTimer?: unknown;
+  postAbortReaperTimer?: unknown;
   agentEndCheck?: Promise<void>;
   ambiguousTerminalTimer?: unknown;
   terminalizing: boolean;

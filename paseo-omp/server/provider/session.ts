@@ -104,6 +104,7 @@ const USAGE_REFRESH_MS = 100;
 const FINAL_USAGE_WAIT_MS = 250;
 const COMPACTION_MAX_WAIT_MS = 5 * 60_000;
 const AGENT_END_SETTLE_MS = 5_000;
+const POST_ABORT_SETTLE_MS = 30_000;
 export const ABORT_SETTLE_TIMEOUT_MS = 10_000;
 export const DEFERRED_END_TIMEOUT_MS = 30_000;
 export const STEER_TIMEOUT_MS = 60_000;
@@ -1451,6 +1452,16 @@ export class OmpProviderSession {
       return;
     }
     turn.interrupted = true;
+    if (
+      turn.deferredAgentEnd !== undefined &&
+      !turn.terminal &&
+      this.activeTurn === turn
+    ) {
+      this.subsessions?.terminalize("canceled");
+      turn.deferredAgentEnd = undefined;
+      this.clearDeferredEndDeadline(turn);
+      await this.finishTurn(turn, "canceled", undefined, true, true);
+    }
     const runtime = this.runtime;
     const abort: PendingAbort = {
       turn,
@@ -1493,6 +1504,8 @@ export class OmpProviderSession {
           this.clearDeferredEndDeadline(abort.turn);
         }
         await this.finishTurn(abort.turn, "canceled", undefined, true, true);
+      } else if (!abort.turn.terminal && this.activeTurn === abort.turn) {
+        this.armPostAbortReaper(abort.turn);
       }
       this.emit({ type: "request.completed", requestId });
     } catch (error) {
@@ -3090,6 +3103,27 @@ export class OmpProviderSession {
     turn.deferredEndDeadlineTimer = undefined;
   }
 
+  private armPostAbortReaper(turn: ActiveTurn): void {
+    this.clearPostAbortReaper(turn);
+    turn.postAbortReaperTimer = this.scheduler.set(() => {
+      turn.postAbortReaperTimer = undefined;
+      if (turn.terminal || turn.terminalizing || this.activeTurn !== turn) return;
+      this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
+      this.invalidateRuntime("OMP turn did not end after interrupt", "canceled");
+      void this.finishTurn(turn, "canceled", undefined, true, true);
+    }, POST_ABORT_SETTLE_MS);
+  }
+
+  private clearPostAbortReaper(turn: ActiveTurn): void {
+    if (turn.postAbortReaperTimer === undefined) return;
+    try {
+      this.scheduler.clear(turn.postAbortReaperTimer);
+    } catch {
+      // The one-shot reaper already fired; its guard clauses are authoritative.
+    }
+    turn.postAbortReaperTimer = undefined;
+  }
+
   private resumeDeferredAgentEnd(): void {
     const turn = this.activeTurn;
     if (!turn || turn.terminal || turn.terminalizing || this.hasTerminalConflict(turn)) {
@@ -3363,6 +3397,7 @@ export class OmpProviderSession {
       turn.agentEndDeadlineTimer = undefined;
     }
     this.clearDeferredEndDeadline(turn);
+    this.clearPostAbortReaper(turn);
     const wake = Promise.withResolvers<void>();
     turn.terminalWake = wake;
     const generation = turn.generation;
