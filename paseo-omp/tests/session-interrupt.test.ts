@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ABORT_SETTLE_TIMEOUT_MS,
   DEFERRED_END_TIMEOUT_MS,
+  INTERRUPT_ACK_TIMEOUT_MS,
   STEER_TIMEOUT_MS,
 } from "../server/provider/session";
 import {
@@ -310,6 +311,63 @@ describe("OMP bounded stop paths", () => {
         }),
       }),
     );
+    await connection.close();
+  });
+
+  test("a hanging native abort still acknowledges Stop inside the daemon budget", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness();
+    await openSession(connection, events);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "hang-abort-ack", "work"));
+    const session = sessionAt(runtime);
+    session.abortGate = new Promise<void>(() => {});
+    const interrupted = connection.send({
+      type: "session.interrupt",
+      requestId: "stop-hung-abort-ack",
+      sessionId: "session-1",
+    });
+    await scheduler.flush();
+    await scheduler.flush(INTERRUPT_ACK_TIMEOUT_MS);
+    await events.waitFor(
+      (event) => event.type === "request.completed" && event.requestId === "stop-hung-abort-ack",
+    );
+    await scheduler.flush(ABORT_SETTLE_TIMEOUT_MS);
+    await scheduler.flush();
+    await interrupted;
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "canceled" }));
+    await connection.close();
+  });
+
+  test("an abort failure against a dead runtime fails the turn instead of pinning it", async () => {
+    const { connection, events, runtime, scheduler } = await createHarness();
+    await openSession(connection, events);
+    const turnId = turnIdFrom(await startPrompt(connection, events, "dead-runtime-abort", "work"));
+    const session = sessionAt(runtime);
+    const abort = Promise.withResolvers<void>();
+    session.abortGate = abort.promise;
+    session.abortError = new Error("transport closed");
+    session.stateGate = new Promise<void>(() => {});
+    const interrupted = connection.send({
+      type: "session.interrupt",
+      requestId: "stop-dead-runtime",
+      sessionId: "session-1",
+    });
+    abort.resolve();
+    await scheduler.flush();
+    await scheduler.flush();
+    await scheduler.flush();
+    await interrupted;
+    await events.waitFor(
+      (event) => event.type === "request.failed" && event.requestId === "stop-dead-runtime",
+    );
+    const terminal = await events.waitFor(
+      (event) =>
+        event.type === "session.turn" && event.turnId === turnId && event.state !== "started",
+    );
+    expect(terminal).toEqual(expect.objectContaining({ state: "failed" }));
     await connection.close();
   });
 });

@@ -105,6 +105,10 @@ const FINAL_USAGE_WAIT_MS = 250;
 const COMPACTION_MAX_WAIT_MS = 5 * 60_000;
 const AGENT_END_SETTLE_MS = 5_000;
 const POST_ABORT_SETTLE_MS = 30_000;
+// The daemon rescues an unacknowledged session.interrupt after ~2s and treats
+// the turn as unmanageable from then on, so the ack must land inside that
+// budget even while the native abort is still settling.
+export const INTERRUPT_ACK_TIMEOUT_MS = 1_000;
 export const ABORT_SETTLE_TIMEOUT_MS = 10_000;
 export const DEFERRED_END_TIMEOUT_MS = 30_000;
 export const STEER_TIMEOUT_MS = 60_000;
@@ -1477,37 +1481,96 @@ export class OmpProviderSession {
   private async settleInterrupt(requestId: string, abort: PendingAbort): Promise<void> {
     const abortTimeout = Promise.withResolvers<null>();
     const abortTimer = this.scheduler.set(() => abortTimeout.resolve(null), ABORT_SETTLE_TIMEOUT_MS);
+    const ackDeadline = Promise.withResolvers<null>();
+    const ackTimer = this.scheduler.set(() => ackDeadline.resolve(null), INTERRUPT_ACK_TIMEOUT_MS);
+    const abortOutcome = abort.promise.then(
+      () => ({ status: "settled" }) as const,
+      (error: unknown) => ({ status: "failed", error }) as const,
+    );
+    let requestOpen = true;
+    const completeRequest = (): void => {
+      if (!requestOpen) return;
+      requestOpen = false;
+      this.emit({ type: "request.completed", requestId });
+    };
+    const failRequest = (error: unknown): void => {
+      if (!requestOpen) return;
+      requestOpen = false;
+      abort.turn.interrupted = false;
+      this.emit({
+        type: "request.failed",
+        requestId,
+        error: providerError(error, "OMP interrupt failed"),
+      });
+    };
     try {
-      const abortTimedOut = await Promise.race([
-        abort.promise.then(() => false),
-        abortTimeout.promise.then(() => true),
+      const first = await Promise.race([
+        abortOutcome,
+        ackDeadline.promise.then(() => ({ status: "ack" }) as const),
       ]);
-      if (abortTimedOut) {
+      if (first.status === "ack") completeRequest();
+      const outcome =
+        first.status === "ack"
+          ? await Promise.race([
+              abortOutcome,
+              abortTimeout.promise.then(() => ({ status: "timed-out" }) as const),
+            ])
+          : first;
+      if (outcome.status === "timed-out") {
         this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
         this.invalidateRuntime("OMP interrupt timed out", "canceled");
         if (!abort.turn.terminal && this.activeTurn === abort.turn) {
           await this.finishTurn(abort.turn, "canceled", undefined, true, true);
         }
-        this.emit({ type: "request.completed", requestId });
+        completeRequest();
         return;
       }
-      if (
-        (abort.turn.terminalizing ||
-          abort.forceTerminal ||
-          abort.turn.deferredAgentEnd !== undefined) &&
-        !abort.turn.terminal &&
-        this.activeTurn === abort.turn
-      ) {
-        if (abort.turn.deferredAgentEnd !== undefined) {
-          this.subsessions?.terminalize("canceled");
-          abort.turn.deferredAgentEnd = undefined;
-          this.clearDeferredEndDeadline(abort.turn);
+      if (outcome.status === "settled") {
+        if (
+          (abort.turn.terminalizing ||
+            abort.forceTerminal ||
+            abort.turn.deferredAgentEnd !== undefined) &&
+          !abort.turn.terminal &&
+          this.activeTurn === abort.turn
+        ) {
+          if (abort.turn.deferredAgentEnd !== undefined) {
+            this.subsessions?.terminalize("canceled");
+            abort.turn.deferredAgentEnd = undefined;
+            this.clearDeferredEndDeadline(abort.turn);
+          }
+          await this.finishTurn(abort.turn, "canceled", undefined, true, true);
+        } else if (!abort.turn.terminal && this.activeTurn === abort.turn) {
+          this.armPostAbortReaper(abort.turn);
         }
-        await this.finishTurn(abort.turn, "canceled", undefined, true, true);
-      } else if (!abort.turn.terminal && this.activeTurn === abort.turn) {
-        this.armPostAbortReaper(abort.turn);
+        completeRequest();
+        return;
       }
-      this.emit({ type: "request.completed", requestId });
+      const { runtime, turn } = abort;
+      if (
+        this.runtimeDead ||
+        turn.terminal ||
+        turn.generation !== this.generation ||
+        this.runtime !== runtime
+      ) {
+        await this.runtimeDisposal?.catch(() => undefined);
+        completeRequest();
+        return;
+      }
+      const live = await this.readRuntimeStateWithTimeout(runtime);
+      if (
+        live !== undefined &&
+        !this.runtimeDead &&
+        !turn.terminal &&
+        turn.generation === this.generation &&
+        this.runtime === runtime &&
+        requestOpen
+      ) {
+        failRequest(outcome.error);
+        return;
+      }
+      if (requestOpen) failRequest(outcome.error);
+      this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
+      this.handleRuntimeFailure("OMP runtime failed during interrupt");
     } catch (error) {
       const { runtime, turn } = abort;
       if (
@@ -1517,20 +1580,29 @@ export class OmpProviderSession {
         this.runtime !== runtime
       ) {
         await this.runtimeDisposal?.catch(() => undefined);
-        this.emit({ type: "request.completed", requestId });
+        completeRequest();
         return;
       }
-      turn.interrupted = false;
-      this.emit({
-        type: "request.failed",
-        requestId,
-        error: providerError(error, "OMP interrupt failed"),
-      });
+      if (requestOpen) {
+        failRequest(error);
+        return;
+      }
+      this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
+      try {
+        this.handleRuntimeFailure("OMP runtime failed during interrupt");
+      } catch {
+        this.recordOperationalFailure({ category: "terminal-outcome", stage: "unresolved" });
+      }
     } finally {
       try {
         this.scheduler.clear(abortTimer);
       } catch {
         // The one-shot timeout already fired; settle outcome above is authoritative.
+      }
+      try {
+        this.scheduler.clear(ackTimer);
+      } catch {
+        // The one-shot ack deadline already fired; settle outcome above is authoritative.
       }
       if (this.activeAbort === abort) this.activeAbort = null;
     }
