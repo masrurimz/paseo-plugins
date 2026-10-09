@@ -15,7 +15,12 @@ const QuotaRowSchema = z.object({
   recordedAt: z.number().int(),
 });
 
-export function listOmpQuotasFrom(path: string): OmpQuota[] {
+// OMP limit_ids embed reset timestamps, so each historical window is its own
+// series and newest-per-series keeps dead windows forever. The liveness filter
+// below keeps the pill aggregate and the popover on live windows only.
+export const QUOTA_STALE_AFTER_MS = 30 * 24 * 3_600_000;
+
+export function listOmpQuotasFrom(path: string, now: number = Date.now()): OmpQuota[] {
   try {
     const database = new DatabaseSync(path, { readOnly: true, timeout: 500 });
     try {
@@ -33,9 +38,11 @@ export function listOmpQuotasFrom(path: string): OmpQuota[] {
              FROM usage_history
            )
            WHERE position = 1
+             AND (resets_at IS NULL OR resets_at > ?)
+             AND (resets_at IS NOT NULL OR recorded_at > ?)
            ORDER BY COALESCE(usedFraction, -1) DESC, provider, label`,
         )
-        .all();
+        .all(now, now - QUOTA_STALE_AFTER_MS);
       return rows.flatMap((row) => {
         const parsed = QuotaRowSchema.safeParse(row);
         return parsed.success ? [parsed.data] : [];
