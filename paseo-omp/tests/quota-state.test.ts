@@ -124,22 +124,125 @@ describe("OMP quota reader", () => {
       id INTEGER PRIMARY KEY, provider TEXT, account_key TEXT, limit_id TEXT, label TEXT,
       window_label TEXT, used_fraction REAL, status TEXT, resets_at INTEGER, recorded_at INTEGER
     )`);
-    database
-      .prepare("INSERT INTO usage_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(1, "anthropic", "account", "five-hour", "Five hour", "5h", 0.1, "ok", null, 1);
-    database
-      .prepare("INSERT INTO usage_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(2, "anthropic", "account", "five-hour", "Five hour", "5h", 0.9, "warning", 2, 2);
-    database
-      .prepare("INSERT INTO usage_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(3, "openai", "account", "daily", "Daily", null, 0.2, "ok", null, 3);
+    const insert = database.prepare(
+      "INSERT INTO usage_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    const now = Date.now();
+    const hour = 3_600_000;
+    insert.run(
+      1,
+      "anthropic",
+      "account",
+      "five-hour",
+      "Five hour",
+      "5h",
+      0.1,
+      "ok",
+      null,
+      now - 2000,
+    );
+    insert.run(
+      2,
+      "anthropic",
+      "account",
+      "five-hour",
+      "Five hour",
+      "5h",
+      0.9,
+      "warning",
+      now + hour,
+      now - 1000,
+    );
+    insert.run(3, "openai", "account", "daily", "Daily", null, 0.2, "ok", null, now - 1500);
     database.close();
 
     expect(listOmpQuotasFrom(path)).toEqual([
-      expect.objectContaining({ provider: "anthropic", usedFraction: 0.9, recordedAt: 2 }),
-      expect.objectContaining({ provider: "openai", usedFraction: 0.2, recordedAt: 3 }),
+      expect.objectContaining({ provider: "anthropic", usedFraction: 0.9, recordedAt: now - 1000 }),
+      expect.objectContaining({ provider: "openai", usedFraction: 0.2, recordedAt: now - 1500 }),
     ]);
-    expect(listOmpQuotasFrom(join(root, "missing.db"))).toEqual([]);
+  });
+  test("drops expired and abandoned windows so dead rows cannot pin the aggregate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "paseo-omp-quotas-liveness-"));
+    quotaRoots.push(root);
+    const path = join(root, "agent.db");
+    const database = new DatabaseSync(path);
+    database.exec(`CREATE TABLE usage_history (
+      id INTEGER PRIMARY KEY, provider TEXT, account_key TEXT, limit_id TEXT, label TEXT,
+      window_label TEXT, used_fraction REAL, status TEXT, resets_at INTEGER, recorded_at INTEGER
+    )`);
+    const insert = database.prepare(
+      "INSERT INTO usage_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    const now = Date.now();
+    const hour = 3_600_000;
+    const day = 24 * hour;
+    insert.run(
+      1,
+      "anthropic",
+      "account",
+      "seven-day",
+      "Seven day",
+      "7d",
+      0.32,
+      "ok",
+      now + hour,
+      now - hour,
+    );
+    insert.run(
+      2,
+      "kimi-code",
+      "oauth",
+      "total",
+      "Total quota",
+      null,
+      1,
+      "exhausted",
+      now - hour,
+      now - 2 * hour,
+    );
+    insert.run(
+      3,
+      "google-gemini-cli",
+      "oauth",
+      "window",
+      "Quota window",
+      null,
+      1,
+      "",
+      0,
+      now - 100 * day,
+    );
+    insert.run(
+      4,
+      "zai",
+      "api_key",
+      "requests",
+      "Request quota",
+      null,
+      0.99,
+      "ok",
+      null,
+      now - 60 * day,
+    );
+    insert.run(
+      5,
+      "commandcode",
+      "account",
+      "balance",
+      "Credit balance",
+      "balance",
+      null,
+      null,
+      null,
+      now - hour,
+    );
+    database.close();
+
+    expect(
+      listOmpQuotasFrom(path, now)
+        .map((quota) => quota.provider)
+        .sort(),
+    ).toEqual(["anthropic", "commandcode"]);
   });
 
   test("resolves quotas from the configured OMP agent directory", async () => {
@@ -152,7 +255,7 @@ describe("OMP quota reader", () => {
     )`);
     database
       .prepare("INSERT INTO usage_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(1, "anthropic", "account", "daily", "Daily", null, 0.5, "ok", null, 10);
+      .run(1, "anthropic", "account", "daily", "Daily", null, 0.5, "ok", null, Date.now());
     database.close();
     const previous = process.env.PASEO_OMP_AGENT_DIR;
     process.env.PASEO_OMP_AGENT_DIR = root;

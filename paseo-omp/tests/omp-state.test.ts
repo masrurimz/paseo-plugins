@@ -52,10 +52,12 @@ describe("omp quota reader", () => {
     const root = await mkdtemp(join(tmpdir(), "paseo-omp-"));
     temporaryDirectories.push(root);
     const database = createUsageDatabase(join(root, "agent.db"));
+    const now = Date.now();
+    const hour = 3_600_000;
     database.exec(`INSERT INTO usage_history VALUES
-      (1, 100, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.1, 'ok', 300),
-      (2, 200, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.8, 'ok', 400),
-      (3, 150, 'openai', 'account', 'weekly', 'Codex Weekly', 'Weekly', 0.3, 'ok', NULL)`);
+      (1, ${now - 3000}, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.1, 'ok', ${now + hour}),
+      (2, ${now - 1000}, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.8, 'ok', ${now + hour}),
+      (3, ${now - 2000}, 'openai', 'account', 'weekly', 'Codex Weekly', 'Weekly', 0.3, 'ok', NULL)`);
     database.close();
 
     expect(listOmpQuotasFrom(join(root, "agent.db"))).toEqual([
@@ -65,8 +67,8 @@ describe("omp quota reader", () => {
         windowLabel: "5 Hour",
         usedFraction: 0.8,
         status: "ok",
-        resetsAt: 400,
-        recordedAt: 200,
+        resetsAt: now + hour,
+        recordedAt: now - 1000,
       },
       {
         provider: "openai",
@@ -75,7 +77,7 @@ describe("omp quota reader", () => {
         usedFraction: 0.3,
         status: "ok",
         resetsAt: null,
-        recordedAt: 150,
+        recordedAt: now - 2000,
       },
     ]);
   });

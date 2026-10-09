@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, test } from "vitest";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   discoverOmpUsage,
   discoverOmpUsageStores,
@@ -57,10 +57,7 @@ describe("usage-source discover enumeration", () => {
       join(profileAgentDir, "agent.db"),
       `INSERT INTO usage_history VALUES (1, 'openai', 'account', 'weekly', 'Weekly', NULL, 0.25, 'ok', NULL, 10)`,
     );
-    const stores = discoverOmpUsageStores(
-      usageEnvironment(home, { OMP_PROFILE: "team" }),
-      "linux",
-    );
+    const stores = discoverOmpUsageStores(usageEnvironment(home, { OMP_PROFILE: "team" }), "linux");
     expect(stores.map((store) => store.profile).sort()).toContain("team");
     expect(stores.map((store) => store.dbPath)).toContain(join(agentDir, "agent.db"));
 
@@ -126,11 +123,13 @@ describe("usage-source fetch mapping", () => {
     const root = await mkdtemp(join(tmpdir(), "paseo-usage-fetch-"));
     roots.push(root);
     const path = join(root, "agent.db");
+    const now = Date.now();
+    const resetAt = now + 3_600_000;
     createUsageDatabase(
       path,
       `INSERT INTO usage_history VALUES
-        (1, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.1, 'ok', 1700000000000, 1),
-        (2, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.8, 'ok', 1700000000000, 2)`,
+        (1, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.1, 'ok', ${resetAt}, ${now - 2000}),
+        (2, 'anthropic', 'account', 'five-hour', 'Claude 5 Hour', '5 Hour', 0.8, 'ok', ${resetAt}, ${now - 1000})`,
     );
     const report = (await fetchOmpUsage({
       route: { store: "default", path },
@@ -145,7 +144,7 @@ describe("usage-source fetch mapping", () => {
         shortLabel: "5 Hour",
         usedPct: 80,
         remainingPct: 20,
-        resetsAt: new Date(1700000000000).toISOString(),
+        resetsAt: new Date(resetAt).toISOString(),
         tone: "warning",
         summary: true,
       }),
@@ -188,13 +187,14 @@ describe("usage-source fetch mapping", () => {
     const betaDir = join(home, ".omp", "profiles", "beta", "agent");
     await mkdir(alphaDir, { recursive: true });
     await mkdir(betaDir, { recursive: true });
+    const recordedAt = Date.now();
     createUsageDatabase(
       join(alphaDir, "agent.db"),
-      `INSERT INTO usage_history VALUES (1, 'anthropic', 'alpha', 'daily', 'Alpha Daily', NULL, 0.1, 'ok', NULL, 1)`,
+      `INSERT INTO usage_history VALUES (1, 'anthropic', 'alpha', 'daily', 'Alpha Daily', NULL, 0.1, 'ok', NULL, ${recordedAt})`,
     );
     createUsageDatabase(
       join(betaDir, "agent.db"),
-      `INSERT INTO usage_history VALUES (1, 'openai', 'beta', 'daily', 'Beta Daily', NULL, 0.9, 'ok', NULL, 1)`,
+      `INSERT INTO usage_history VALUES (1, 'openai', 'beta', 'daily', 'Beta Daily', NULL, 0.9, 'ok', NULL, ${recordedAt})`,
     );
     const accounts = await discoverOmpUsage(usageEnvironment(home), "linux");
     const beta = accounts.find((account) =>
