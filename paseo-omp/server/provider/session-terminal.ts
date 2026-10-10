@@ -135,9 +135,12 @@ export function terminalOutcome(
     (event.messageCount === undefined || messages.length >= event.messageCount)
   ) {
     const status = lastAssistantStatus(messages);
-    return status === "unavailable" ? "completed" : status;
+    if (status !== "unavailable") return status;
+    if (event.requestId !== undefined) return "completed";
+    if (messages.length === 0 && event.messageCount === undefined) return "completed";
+    return undefined;
   }
-  if (event.messageCount === 0) return "completed";
+  if (event.messageCount === 0) return undefined;
   if (
     turn.lastCompletedAssistantOutcome !== undefined &&
     (event.messageCount === undefined || turn.completedMessageCount >= event.messageCount)
