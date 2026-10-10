@@ -11,7 +11,7 @@ type ProviderCatalogOptionsCompat = {
 
 import { MAX_INHERITED_ENVIRONMENT_NAMES } from "../../shared/provider-launch-settings";
 import { parseOmpProviderOptions } from "./provider-options";
-import { OmpPublicError } from "./security";
+import { OmpPublicError, utf8Bytes } from "./security";
 import { OmpModeSchema } from "./settings";
 
 const OMP_BUILTIN_TOOL_NAMES = [
@@ -122,6 +122,9 @@ export function normalizeOmpSessionConfig(
   if (Object.keys(config.settings).length > 0) {
     throw new OmpPublicError("OMP does not expose live provider settings");
   }
+  if (config.title !== undefined && utf8Bytes(config.title) > 256) {
+    throw new OmpPublicError("OMP session title is too large");
+  }
   const parsedMode = OmpModeSchema.safeParse(config.mode ?? "full");
   if (!parsedMode.success) {
     throw new OmpPublicError(`Unsupported OMP mode '${String(config.mode)}'`);
@@ -160,5 +163,6 @@ export function normalizeOmpSessionConfig(
       },
     }),
     ...(tools ? { tools } : {}),
+    ...(config.title !== undefined ? { title: config.title } : {}),
   };
 }

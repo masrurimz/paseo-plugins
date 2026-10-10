@@ -27,6 +27,8 @@ export interface OmpStartOptions {
   thinkingOption?: string;
   systemPrompt?: string;
   roleModels?: Readonly<{ smol?: string; slow?: string; plan?: string }>;
+  /** Host-provided session title carried through normalization. */
+  title?: string;
   tools?: readonly string[];
   sessionDir?: string;
   readyTimeoutMs?: number;

@@ -90,6 +90,39 @@ describe("OMP direct provider", () => {
     });
     await connection.close();
   });
+  test("surfaces descriptor titles and the last prompt preview as the entry description", async () => {
+    const runtime = new FakeOmpRuntime();
+    runtime.descriptors.push({
+      id: NATIVE_SESSION_ID,
+      cwd: "/repo",
+      title: "Sourdough plan",
+      firstPromptPreview: "Plan the bake",
+      lastPromptPreview: "Add rye",
+    });
+    const { connection, events } = await createHarness(runtime, new ManualScheduler(), [
+      "prompt.message",
+      "session.list",
+      "session.persistence",
+    ]);
+    await connection.send({ type: "sessions", requestId: "titled-list", cwd: "/repo" });
+    await expect(
+      events.waitFor((event) => event.type === "sessions" && event.requestId === "titled-list"),
+    ).resolves.toEqual({
+      type: "sessions",
+      requestId: "titled-list",
+      sessions: [
+        {
+          persistence: { version: 1, data: { sessionId: NATIVE_SESSION_ID } },
+          cwd: "/repo",
+          title: "Sourdough plan",
+          firstPromptPreview: "Plan the bake",
+          lastPromptPreview: "Add rye",
+          description: "Add rye",
+        },
+      ],
+    });
+    await connection.close();
+  });
 
   test("makes replaying sessions closable and routes a ready-callback prompt", async () => {
     const runtime = new FakeOmpRuntime();

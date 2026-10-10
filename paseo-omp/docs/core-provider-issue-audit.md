@@ -106,6 +106,8 @@ The plugin is stable. Track these remaining gaps separately from supported funct
 4. Add an explicit large-skill presentation regression or document it as host-owned.
 5. Keep stdout contamination defenses, and pursue upstream OMP protocol-channel purity.
 6. Keep host-owned issues visibly separated: provider snapshot refresh, voice eligibility, MCP schemas, WebSocket buffering, archive routing, and draft/agent creation.
+7. OMP never generates titles inside headless `rpc-ui` sessions. Three live probes against OMP 18.8.7 (persistent and ephemeral session dirs, trivial and high-signal prompts, up to 90 seconds of post-turn watch) observed zero `setTitle` events and an empty `{"type":"title"}` record. The plugin keeps `--no-title` unset and keeps the `setTitle` to `session.notice` bridge so titles flow if a future OMP starts emitting them.
+8. Paseo 0.10.3 applies provider titles to root agent headers through no channel. `session.opened` title and description are stored as capabilities plus persistence only, `session.notice` renders as a timeline message, and the bundled `omp` provider ignores native `setTitle` the same way. Root headers come from the explicit config title or the first-prompt provisional title. A live provider-driven rename needs a host-side channel.
 
 ## Maintenance rule
 

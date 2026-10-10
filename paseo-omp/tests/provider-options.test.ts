@@ -200,6 +200,15 @@ describe("OMP provider option normalization", () => {
       );
     }
   });
+  test("carries the host session title through normalization with the open-path bound", () => {
+    expect(normalizeOmpSessionConfig(sessionConfig({ title: "Sourdough plan" })).title).toBe(
+      "Sourdough plan",
+    );
+    expect(normalizeOmpSessionConfig(sessionConfig()).title).toBeUndefined();
+    expect(() => normalizeOmpSessionConfig(sessionConfig({ title: "x".repeat(257) }))).toThrow(
+      "OMP session title is too large",
+    );
+  });
   test("collects only explicit credential values and excludes short values", () => {
     const config = sessionConfig({
       env: {

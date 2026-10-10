@@ -494,9 +494,6 @@ export class OmpProviderSession {
     const openingTitle = resolveDescriptorTitleForOpen(persistedDescriptor);
     if (openingTitle !== undefined) effectiveConfig.title = openingTitle;
     validateOmpHostToolConfig(effectiveConfig);
-    if (input.config.title && utf8Bytes(input.config.title) > 256) {
-      throw new OmpPublicError("OMP session title is too large");
-    }
     const startOptions: OmpStartOptions = {
       ...normalizedConfig,
       // Thinking is authorized only after this runtime reports its exact model catalog.

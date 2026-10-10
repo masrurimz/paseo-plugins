@@ -746,6 +746,8 @@ export class FakeOmpRuntime implements OmpRuntime {
     title?: string;
     updatedAt?: string;
     transcriptFile?: string;
+    firstPromptPreview?: string;
+    lastPromptPreview?: string;
   }> = [];
   resolveSessions = true;
   nextCanReplayHistory = true;

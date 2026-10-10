@@ -921,6 +921,7 @@ export function createOmpConnection(
               ...(session.lastPromptPreview
                 ? { lastPromptPreview: session.lastPromptPreview }
                 : {}),
+              ...(session.lastPromptPreview ? { description: session.lastPromptPreview } : {}),
             })),
           });
         } catch (error) {
